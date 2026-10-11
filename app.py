@@ -15,7 +15,7 @@ WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin")
 LOGIN_PATH = "admin_login"
 DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data" if os.path.exists("/app/data") else DEFAULT_DATA_DIR)
-APP_VERSION = "v43.00-singbox-pro-enhanced"
+APP_VERSION = "v43.10-komari-nezha-pro"
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 BACKUP_FILE = os.path.join(DATA_DIR, "data.json.bak")
 CACHE_FILE = os.path.join(DATA_DIR, "domain_cache.json")
@@ -148,6 +148,9 @@ def load_data():
             "sub_token": WEB_PASSWORD,
             "web_password": WEB_PASSWORD,
             "custom_groups": "snip, work",
+            "probe_type": "komari",
+            "probe_url": "",
+            "probe_token": "",
             "nezha_url": "",
             "nezha_token": ""
         }
@@ -164,8 +167,11 @@ def load_data():
                 if "singbox_tpl" not in d: d["singbox_tpl"] = default_conf["singbox_tpl"]
                 if "clash_tpl" not in d: d["clash_tpl"] = default_conf["clash_tpl"]
                 if "web_password" not in d["config"]: d["config"]["web_password"] = WEB_PASSWORD
-                if "nezha_url" not in d["config"]: d["config"]["nezha_url"] = ""
-                if "nezha_token" not in d["config"]: d["config"]["nezha_token"] = ""
+                if "probe_type" not in d["config"]: d["config"]["probe_type"] = "komari"
+                if "probe_url" not in d["config"]: d["config"]["probe_url"] = d["config"].get("nezha_url", "")
+                if "probe_token" not in d["config"]: d["config"]["probe_token"] = d["config"].get("nezha_token", "")
+                if "nezha_url" not in d["config"]: d["config"]["nezha_url"] = d["config"]["probe_url"]
+                if "nezha_token" not in d["config"]: d["config"]["nezha_token"] = d["config"]["probe_token"]
                 
                 # 自动清理历史遗留的 24TB 虚假 subconverter 流量占位数据
                 for sub in d.get('remote_subs', []):
@@ -464,6 +470,113 @@ def parse_traffic_info(header_str, custom_total_gb=0):
         }
     except:
         return None
+
+async def fetch_komari_stats(session, komari_url, api_key=""):
+    """抓取 Komari 探针 (1.5+) 节点的实时进出网卡流量"""
+    if not komari_url or not aiohttp: return {}
+    komari_url = komari_url.strip().rstrip('/')
+    if not komari_url.startswith('http'):
+        komari_url = f"https://{komari_url}"
+        
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    if api_key:
+        headers['Authorization'] = f"Bearer {api_key.strip()}"
+
+    servers_map = {}
+    
+    # 方式 1：优先使用 Komari JSON-RPC (/api/rpc2) 单次批量拉取所有节点及最新状态
+    try:
+        rpc_url = f"{komari_url}/api/rpc2"
+        node_info_map = {}
+        # 1.1 获取节点列表（提取 UUID、节点名称 Name 与 traffic_limit）
+        nodes_req = {"jsonrpc": "2.0", "method": "common:getNodes", "params": {}, "id": 1}
+        async with session.post(rpc_url, json=nodes_req, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+            if r.status == 200:
+                res = await r.json()
+                data = res.get('result') or {}
+                if isinstance(data, dict):
+                    for uid, c in data.items():
+                        if isinstance(c, dict):
+                            node_info_map[str(uid).lower()] = {
+                                "name": str(c.get('name', '')).strip(),
+                                "traffic_limit": int(c.get('traffic_limit') or 0)
+                            }
+                elif isinstance(data, list):
+                    for c in data:
+                        if isinstance(c, dict) and c.get('uuid'):
+                            node_info_map[str(c['uuid']).lower()] = {
+                                "name": str(c.get('name', '')).strip(),
+                                "traffic_limit": int(c.get('traffic_limit') or 0)
+                            }
+
+        # 1.2 获取节点最新流量状态（提取 net_total_up 与 net_total_down）
+        status_req = {"jsonrpc": "2.0", "method": "common:getNodesLatestStatus", "params": {}, "id": 2}
+        async with session.post(rpc_url, json=status_req, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+            if r.status == 200:
+                res = await r.json()
+                stat_data = res.get('result') or {}
+                if isinstance(stat_data, dict):
+                    for uid, s in stat_data.items():
+                        if isinstance(s, dict):
+                            up = int(s.get('net_total_up') or 0)
+                            down = int(s.get('net_total_down') or 0)
+                            used = up + down
+                            uid_str = str(uid).lower()
+                            n_info = node_info_map.get(uid_str, {})
+                            name = n_info.get('name', '')
+                            limit = n_info.get('traffic_limit', 0)
+                            
+                            entry = {
+                                "uuid": uid_str,
+                                "name": name,
+                                "used": used,
+                                "up": up,
+                                "down": down,
+                                "limit": limit
+                            }
+                            # 同时通过 UUID 和 节点名称 Name 建立双向索引，用户填哪一个都能匹配！
+                            servers_map[uid_str] = entry
+                            if name:
+                                servers_map[name.lower()] = entry
+    except Exception as e:
+        write_log(f"Komari RPC fetch error: {e}")
+
+    # 方式 2：REST API 兜底 (/api/nodes 与 /api/recent/:uuid)
+    if not servers_map:
+        try:
+            nodes_url = f"{komari_url}/api/nodes"
+            async with session.get(nodes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    nodes_list = data.get('data') or []
+                    if isinstance(nodes_list, list):
+                        for c in nodes_list:
+                            if not isinstance(c, dict): continue
+                            uid = str(c.get('uuid') or '').strip()
+                            name = str(c.get('name') or '').strip()
+                            limit = int(c.get('traffic_limit') or 0)
+                            if not uid: continue
+                            
+                            used = 0
+                            try:
+                                recent_url = f"{komari_url}/api/recent/{uid}"
+                                async with session.get(recent_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4), ssl=False) as rr:
+                                    if rr.status == 200:
+                                        r_data = await rr.json()
+                                        recs = r_data.get('data') or []
+                                        if recs and isinstance(recs, list) and isinstance(recs[-1], dict):
+                                            last_rec = recs[-1]
+                                            used = int(last_rec.get('net_total_up') or 0) + int(last_rec.get('net_total_down') or 0)
+                            except: pass
+                            
+                            entry = {"uuid": uid.lower(), "name": name, "used": used, "limit": limit}
+                            servers_map[uid.lower()] = entry
+                            if name:
+                                servers_map[name.lower()] = entry
+        except Exception as e:
+            write_log(f"Komari REST fetch error: {e}")
+
+    return servers_map
 
 async def fetch_nezha_stats(session, nezha_url, nezha_token=""):
     if not nezha_url or not aiohttp: return {}
@@ -1333,18 +1446,26 @@ async def async_process_subs():
             all_nodes = []
             sem = asyncio.Semaphore(int(cfg.get('threads', 8))) 
 
-            # 1. 如果配置了哪吒探针，异步拉取服务器实时网卡流量
-            nezha_servers = {}
-            nezha_url = cfg.get('nezha_url', '').strip()
-            nezha_token = cfg.get('nezha_token', '').strip()
-            if nezha_url and aiohttp:
+            # 1. 如果配置了探针 (Komari / 哪吒)，异步拉取服务器实时网卡进出流量
+            probe_servers = {}
+            probe_type = str(cfg.get('probe_type', 'komari')).lower()
+            probe_url = (cfg.get('probe_url') or cfg.get('nezha_url', '')).strip()
+            probe_token = (cfg.get('probe_token') or cfg.get('nezha_token', '')).strip()
+
+            if probe_url and aiohttp:
                 try:
-                    async with aiohttp.ClientSession() as ns_session:
-                        nezha_servers = await fetch_nezha_stats(ns_session, nezha_url, nezha_token)
-                        if nezha_servers:
-                            write_log(f"Nezha Probe synced: {len(nezha_servers)} servers found")
+                    async with aiohttp.ClientSession() as ps_session:
+                        if probe_type == 'komari':
+                            probe_servers = await fetch_komari_stats(ps_session, probe_url, probe_token)
+                            if probe_servers:
+                                ucnt = len({v.get('uuid') for v in probe_servers.values() if isinstance(v, dict) and v.get('uuid')}) or len(probe_servers)
+                                write_log(f"Komari Probe synced: {ucnt} nodes loaded")
+                        else:
+                            probe_servers = await fetch_nezha_stats(ps_session, probe_url, probe_token)
+                            if probe_servers:
+                                write_log(f"Nezha Probe synced: {len(probe_servers)} servers loaded")
                 except Exception as e:
-                    write_log(f"Nezha Probe sync error: {e}")
+                    write_log(f"Probe Sync Error ({probe_type}): {e}")
 
             async def process_single_sub(session, sub_item):
                 raw_text = sub_item.get('url', '')
@@ -1353,7 +1474,7 @@ async def async_process_subs():
                 quota_gb = 0
                 try: quota_gb = float(sub_item.get('quota_gb', 0) or 0)
                 except: quota_gb = 0
-                nezha_id = str(sub_item.get('nezha_id', '')).strip()
+                probe_id = str(sub_item.get('probe_id') or sub_item.get('nezha_id', '')).strip()
                 
                 lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
                 http_links = []; direct_nodes = []; raw_content_parts = []
@@ -1386,12 +1507,20 @@ async def async_process_subs():
                             if info and not fetched_info: fetched_info = info
                             if text: raw_content_parts.append(text)
 
-                # 流量计算：优先使用哪吒探针 -> 其次使用真实机场订阅信息 -> 自定义配额
-                if nezha_id and nezha_id in nezha_servers:
-                    ns = nezha_servers[nezha_id]
-                    used_bytes = ns['used']
-                    real_t = int(quota_gb * 1073741824) if quota_gb > 0 else 0
+                # 流量计算：优先使用探针实时数据 (Komari / 哪吒) -> 其次使用真实机场订阅信息 -> 自定义配额
+                matched_probe = None
+                if probe_id and probe_servers:
+                    if probe_id in probe_servers:
+                        matched_probe = probe_servers[probe_id]
+                    elif probe_id.lower() in probe_servers:
+                        matched_probe = probe_servers[probe_id.lower()]
+
+                if matched_probe:
+                    used_bytes = int(matched_probe.get('used', 0))
+                    limit_bytes = int(matched_probe.get('limit', 0))
+                    real_t = int(quota_gb * 1073741824) if quota_gb > 0 else (limit_bytes if limit_bytes > 0 else 0)
                     pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
+                    expire_tag = "Komari实时" if probe_type == 'komari' else "哪吒实时"
                     sub_item['info'] = {
                         "used": format_bytes_smart(used_bytes),
                         "used_bytes": used_bytes,
@@ -1399,9 +1528,9 @@ async def async_process_subs():
                         "total_bytes": real_t,
                         "percent": pct,
                         "has_total": real_t > 0,
-                        "expire": "探针实时",
+                        "expire": expire_tag,
                         "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981"),
-                        "source": "nezha"
+                        "source": probe_type
                     }
                 elif fetched_info:
                     # 如果用户指定了该 VPS 的真实配额，使用用户设定的真实配额计算百分比
@@ -1599,8 +1728,11 @@ def save():
     d['config']['ua'] = request.form.get('cfg_ua', 'v2rayNG/1.8.5')
     d['config']['sub_token'] = request.form.get('cfg_sub_token', '').strip() or get_current_password()
     d['config']['custom_groups'] = request.form.get('cfg_custom_groups', '').replace('，', ',')
-    d['config']['nezha_url'] = request.form.get('cfg_nezha_url', '').strip()
-    d['config']['nezha_token'] = request.form.get('cfg_nezha_token', '').strip()
+    d['config']['probe_type'] = request.form.get('cfg_probe_type', 'komari').strip()
+    d['config']['probe_url'] = request.form.get('cfg_probe_url', '').strip() or request.form.get('cfg_nezha_url', '').strip()
+    d['config']['probe_token'] = request.form.get('cfg_probe_token', '').strip() or request.form.get('cfg_nezha_token', '').strip()
+    d['config']['nezha_url'] = d['config']['probe_url']
+    d['config']['nezha_token'] = d['config']['probe_token']
     
     new_web_password = request.form.get('cfg_web_password', '').strip()
     if new_web_password:
@@ -1610,7 +1742,9 @@ def save():
     tags = request.form.getlist('sub_tags[]')
     enables = request.form.getlist('sub_enables[]')
     quotas = request.form.getlist('sub_quotas[]')
-    nezha_ids = request.form.getlist('sub_nezha_ids[]')
+    probe_ids = request.form.getlist('sub_probe_ids[]')
+    if not probe_ids:
+        probe_ids = request.form.getlist('sub_nezha_ids[]')
 
     new_subs = []
     for i, u in enumerate(urls):
@@ -1626,14 +1760,15 @@ def save():
             if i < len(quotas) and quotas[i].strip():
                 try: q_val = float(quotas[i].strip())
                 except: q_val = 0
-            nid_val = nezha_ids[i].strip() if i < len(nezha_ids) else ""
+            pid_val = probe_ids[i].strip() if i < len(probe_ids) else ""
             
             new_subs.append({
                 "url": u.strip(),
                 "tag": tags[i].strip(),
                 "enabled": is_enabled,
                 "quota_gb": q_val,
-                "nezha_id": nid_val,
+                "probe_id": pid_val,
+                "nezha_id": pid_val,
                 "info": old_info
             })
     d['remote_subs'] = new_subs

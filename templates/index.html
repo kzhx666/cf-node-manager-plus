@@ -847,11 +847,11 @@
                                 <input type="number" step="any" name="sub_quotas[]" value="{{ sub.quota_gb if sub.quota_gb else '' }}" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 0.75rem; color: var(--text-muted);">绑定哪吒探针 Server ID:</span>
-                                <input type="text" name="sub_nezha_ids[]" value="{{ sub.nezha_id if sub.nezha_id else '' }}" placeholder="如: 1 (可选绑定)" style="width: 120px; padding: 3px 8px; font-size: 0.78rem;">
+                                <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
+                                <input type="text" name="sub_probe_ids[]" value="{{ sub.probe_id or sub.nezha_id or '' }}" placeholder="Komari填名称/UUID，哪吒填ID" style="width: 190px; padding: 3px 8px; font-size: 0.78rem;">
                             </div>
                             <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                                * 普通 VPS 留空将不显示虚假 24TB；绑定探针可自动同步网卡进出真实流量
+                                * 适配 Komari 探针 (直接填节点名称如 Tokyo-01 或 UUID) 或 哪吒探针 (填ID)，自动同步实时进出流量
                             </span>
                         </div>
 
@@ -904,13 +904,33 @@
                         <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">修改管理员密码 (留空则保持现状)</label>
                         <input type="password" name="cfg_web_password" placeholder="输入新密码以修改...">
                     </div>
-                    <div>
-                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">哪吒探针面板地址 (可选，用于同步 VPS 真实网卡流量)</label>
-                        <input type="text" name="cfg_nezha_url" value="{{ data.config.nezha_url or '' }}" placeholder="例如: https://nezha.example.com">
-                    </div>
-                    <div>
-                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">哪吒探针 API Token (可选，若探针未公开详情请填)</label>
-                        <input type="text" name="cfg_nezha_token" value="{{ data.config.nezha_token or '' }}" placeholder="探针后台 API Token / 访问密钥">
+                    <div style="grid-column: span 2; background: rgba(99, 102, 241, 0.05); padding: 14px; border-radius: var(--radius-sm); border: 1px dashed var(--card-border);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="font-size: 0.85rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 6px;">
+                                <span>📡 服务器探针配置 (VPS 实时网卡进出流量监控)</span>
+                            </span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">已全面适配 Komari (1.5+) 及 哪吒探针</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 2fr 2fr; gap: 10px;">
+                            <div>
+                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 4px;">探针系统类型</label>
+                                <select name="cfg_probe_type" style="width: 100%; padding: 7px 10px; font-size: 0.82rem; border-radius: var(--radius-sm); background: var(--input-bg); color: var(--text); border: 1px solid var(--input-border);">
+                                    <option value="komari" {% if data.config.probe_type == 'komari' or not data.config.probe_type %}selected{% endif %}>Komari 探针 (1.5+ 推荐)</option>
+                                    <option value="nezha" {% if data.config.probe_type == 'nezha' %}selected{% endif %}>哪吒探针 (Nezha)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 4px;">探针面板地址 (URL)</label>
+                                <input type="text" name="cfg_probe_url" value="{{ data.config.probe_url or data.config.nezha_url or '' }}" placeholder="例如: https://komari.yourdomain.com">
+                            </div>
+                            <div>
+                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 4px;">探针 API Token / 访问密钥 (可选)</label>
+                                <input type="text" name="cfg_probe_token" value="{{ data.config.probe_token or data.config.nezha_token or '' }}" placeholder="若探针开启私有访问请填写 Token">
+                            </div>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">
+                            💡 提示：填写您的 Komari 探针面板地址后，在上方各订阅节点的分组设置中，填入对应服务器的 <strong>节点名称（如 Tokyo-01、首尔等）</strong> 或 <strong>UUID</strong>，即可自动读取进出网卡累计真实流量！
+                        </div>
                     </div>
                     <div style="grid-column: span 2;">
                         <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自定义快捷分组标签 (支持逗号隔开)</label>
@@ -1400,11 +1420,11 @@
                         <input type="number" step="any" name="sub_quotas[]" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 0.75rem; color: var(--text-muted);">绑定哪吒探针 Server ID:</span>
-                        <input type="text" name="sub_nezha_ids[]" placeholder="如: 1 (可选绑定)" style="width: 120px; padding: 3px 8px; font-size: 0.78rem;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
+                        <input type="text" name="sub_probe_ids[]" placeholder="Komari填名称/UUID，哪吒填ID" style="width: 190px; padding: 3px 8px; font-size: 0.78rem;">
                     </div>
                     <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                        * 普通 VPS 留空将不显示虚假 24TB；绑定探针可自动同步网卡进出真实流量
+                        * 适配 Komari 探针 (直接填节点名称如 Tokyo-01 或 UUID) 或 哪吒探针 (填ID)，自动同步实时进出流量
                     </span>
                 </div>
 
