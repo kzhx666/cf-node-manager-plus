@@ -422,12 +422,13 @@ def format_bytes_smart(bytes_val):
     if bytes_val is None or bytes_val < 0: return ""
     gb = bytes_val / 1073741824.0
     if gb >= 1024:
-        return f"{gb/1024.0:.2f}TB"
+        tb = gb / 1024.0
+        return f"{tb:.1f}TB".replace('.0TB', 'TB')
     elif gb >= 1:
-        return f"{gb:.1f}GB"
+        return f"{gb:.1f}GB".replace('.0GB', 'GB')
     else:
         mb = bytes_val / 1048576.0
-        return f"{mb:.1f}MB"
+        return f"{mb:.1f}MB".replace('.0MB', 'MB')
 
 def is_fake_traffic(u, d, t, e):
     # 24TB dummy total (26388279066624 or 24576 * 1024^3) from subconverter
@@ -1781,8 +1782,6 @@ async def async_process_subs():
 
                     real_t = int(quota_gb * 1073741824) if quota_gb > 0 else (limit_bytes if limit_bytes > 0 else 0)
                     pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
-                    probe_label = "Komari" if probe_type == 'komari' else "哪吒"
-                    expire_tag = f"{probe_label}: {matched_name}" if matched_name else f"{probe_label}实时"
                     sub_item['info'] = {
                         "used": format_bytes_smart(used_bytes),
                         "used_bytes": used_bytes,
@@ -1790,7 +1789,7 @@ async def async_process_subs():
                         "total_bytes": real_t,
                         "percent": pct,
                         "has_total": real_t > 0,
-                        "expire": expire_tag,
+                        "expire": "",
                         "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981"),
                         "source": probe_type,
                         "matched_probe": matched_name,
@@ -1817,7 +1816,7 @@ async def async_process_subs():
                         "total_bytes": int(quota_gb * 1073741824),
                         "percent": 0,
                         "has_total": True,
-                        "expire": "自建节点",
+                        "expire": "",
                         "color": "#10b981",
                         "source": "custom"
                     }
