@@ -811,13 +811,19 @@
                         <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
                         <input name="sub_tags[]" class="sub-name-input" value="{{ sub.tag }}" placeholder="未命名节点分组" onclick="event.stopPropagation()">
                         
-                        {% if sub.info %}
+                        {% if sub.info and sub.info.used %}
                         <div class="traffic-pill" title="已用流量 / 总配额">
+                            {% if sub.info.has_total and sub.info.total %}
                             <div class="traffic-progress-bar">
                                 <div class="traffic-progress-fill" style="width: {{ sub.info.percent }}%; background: {{ sub.info.color }};"></div>
                             </div>
                             <span>{{ sub.info.used }} / {{ sub.info.total }}</span>
+                            {% else %}
+                            <span>📊 已用: {{ sub.info.used }}</span>
+                            {% endif %}
+                            {% if sub.info.expire %}
                             <span style="opacity: 0.7;">({{ sub.info.expire }})</span>
+                            {% endif %}
                         </div>
                         {% endif %}
 
@@ -831,6 +837,24 @@
                     </div>
                     <div class="sub-body">
                         <textarea name="sub_urls[]" rows="3" placeholder="支持多行输入：HTTP/HTTPS 订阅链接、VLESS/VMess/Trojan/Hy2/TUIC/SS 等单节点 URI、或 Base64 文本...">{{ sub.url }}</textarea>
+                        
+                        <div style="display: flex; gap: 12px; margin-top: 10px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px dashed var(--card-border);">
+                            <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-sec); display: flex; align-items: center; gap: 4px;">
+                                <span>📊 流量监控与配额:</span>
+                            </span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.75rem; color: var(--text-muted);">总配额 (GB):</span>
+                                <input type="number" step="any" name="sub_quotas[]" value="{{ sub.quota_gb if sub.quota_gb else '' }}" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.75rem; color: var(--text-muted);">绑定哪吒探针 Server ID:</span>
+                                <input type="text" name="sub_nezha_ids[]" value="{{ sub.nezha_id if sub.nezha_id else '' }}" placeholder="如: 1 (可选绑定)" style="width: 120px; padding: 3px 8px; font-size: 0.78rem;">
+                            </div>
+                            <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
+                                * 普通 VPS 留空将不显示虚假 24TB；绑定探针可自动同步网卡进出真实流量
+                            </span>
+                        </div>
+
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <label class="toggle-switch">
@@ -879,6 +903,14 @@
                     <div>
                         <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">修改管理员密码 (留空则保持现状)</label>
                         <input type="password" name="cfg_web_password" placeholder="输入新密码以修改...">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">哪吒探针面板地址 (可选，用于同步 VPS 真实网卡流量)</label>
+                        <input type="text" name="cfg_nezha_url" value="{{ data.config.nezha_url or '' }}" placeholder="例如: https://nezha.example.com">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">哪吒探针 API Token (可选，若探针未公开详情请填)</label>
+                        <input type="text" name="cfg_nezha_token" value="{{ data.config.nezha_token or '' }}" placeholder="探针后台 API Token / 访问密钥">
                     </div>
                     <div style="grid-column: span 2;">
                         <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自定义快捷分组标签 (支持逗号隔开)</label>
@@ -1358,6 +1390,24 @@
             </div>
             <div class="sub-body show">
                 <textarea name="sub_urls[]" rows="3" placeholder="支持多行：HTTP订阅链接、VLESS/TUIC/Hy2单节点链接、Base64文本..."></textarea>
+                
+                <div style="display: flex; gap: 12px; margin-top: 10px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px dashed var(--card-border);">
+                    <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-sec); display: flex; align-items: center; gap: 4px;">
+                        <span>📊 流量监控与配额:</span>
+                    </span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">总配额 (GB):</span>
+                        <input type="number" step="any" name="sub_quotas[]" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">绑定哪吒探针 Server ID:</span>
+                        <input type="text" name="sub_nezha_ids[]" placeholder="如: 1 (可选绑定)" style="width: 120px; padding: 3px 8px; font-size: 0.78rem;">
+                    </div>
+                    <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
+                        * 普通 VPS 留空将不显示虚假 24TB；绑定探针可自动同步网卡进出真实流量
+                    </span>
+                </div>
+
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label class="toggle-switch">

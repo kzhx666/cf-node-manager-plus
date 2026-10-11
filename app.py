@@ -147,7 +147,9 @@ def load_data():
             "ua": "v2rayNG/1.8.5",
             "sub_token": WEB_PASSWORD,
             "web_password": WEB_PASSWORD,
-            "custom_groups": "snip, work"
+            "custom_groups": "snip, work",
+            "nezha_url": "",
+            "nezha_token": ""
         }
     }
     with DATA_LOCK:
@@ -162,6 +164,17 @@ def load_data():
                 if "singbox_tpl" not in d: d["singbox_tpl"] = default_conf["singbox_tpl"]
                 if "clash_tpl" not in d: d["clash_tpl"] = default_conf["clash_tpl"]
                 if "web_password" not in d["config"]: d["config"]["web_password"] = WEB_PASSWORD
+                if "nezha_url" not in d["config"]: d["config"]["nezha_url"] = ""
+                if "nezha_token" not in d["config"]: d["config"]["nezha_token"] = ""
+                
+                # 自动清理历史遗留的 24TB 虚假 subconverter 流量占位数据
+                for sub in d.get('remote_subs', []):
+                    inf = sub.get('info')
+                    if isinstance(inf, dict):
+                        tot = str(inf.get('total', ''))
+                        exp = str(inf.get('expire', ''))
+                        if '24576' in tot or '26388' in tot or '270' in exp or '267' in exp:
+                            sub['info'] = None
                 return d
         except Exception as e:
             write_log(f"Load Error: {e}")
@@ -377,17 +390,128 @@ async def smart_identify_region(node, tag):
         return f"{flag} {base_name}"
     return base_name
 
-def parse_traffic_info(header_str):
+def format_bytes_smart(bytes_val):
+    if bytes_val is None or bytes_val < 0: return ""
+    gb = bytes_val / 1073741824.0
+    if gb >= 1024:
+        return f"{gb/1024.0:.2f}TB"
+    elif gb >= 1:
+        return f"{gb:.1f}GB"
+    else:
+        mb = bytes_val / 1048576.0
+        return f"{mb:.1f}MB"
+
+def is_fake_traffic(u, d, t, e):
+    # 24TB dummy total (26388279066624 or 24576 * 1024^3) from subconverter
+    if t == 26388279066624 or t == 24576 * 1073741824:
+        return True
+    now_ts = time.time()
+    # Expire date is year 2100 (4102444800) or > 3000 days into the future with >= 10TB total
+    if e >= 4102444800 or (e > now_ts and (e - now_ts) > 86400 * 3000):
+        if t >= 10 * 1024 * 1073741824:
+            return True
+    return False
+
+def parse_traffic_info(header_str, custom_total_gb=0):
     if not header_str: return None
     try:
         info = dict(re.findall(r'(\w+)=(\d+)', header_str))
         if not info: return None
-        u=int(info.get('upload',0)); d=int(info.get('download',0)); t=int(info.get('total',0)); e=int(info.get('expire',0))
-        fmt = lambda n: f"{n/1073741824:.1f}GB"
-        pct = min(100, int((u+d)/t*100)) if t>0 else 0
-        exp = f"剩{(datetime.datetime.fromtimestamp(e)-datetime.datetime.now()).days}天" if e>0 else "无限期"
-        return {"used": fmt(u+d), "total": fmt(t), "percent": pct, "expire": exp, "color": "#28a745" if pct < 80 else "#dc3545"}
-    except: return None
+        u = int(info.get('upload', 0))
+        d = int(info.get('download', 0))
+        t = int(info.get('total', 0))
+        e = int(info.get('expire', 0))
+
+        fake = is_fake_traffic(u, d, t, e)
+        used_bytes = u + d
+
+        if custom_total_gb > 0:
+            real_t = int(custom_total_gb * 1073741824)
+        elif fake:
+            # 过滤 24TB 虚假占位数据，仅真实机场订阅显示总配额
+            real_t = 0
+        else:
+            real_t = t
+
+        # 如果为 subconverter 虚假占位数据，且用户未配置自定义 VPS 总配额，则不显示任何虚假流量胶囊
+        if fake and custom_total_gb <= 0:
+            return None
+
+        exp_str = ""
+        now = time.time()
+        if e > 0 and not fake:
+            diff_days = int((e - now) / 86400)
+            if 0 < diff_days <= 1500:
+                exp_str = f"剩{diff_days}天"
+            elif diff_days > 1500 or e >= 4102444800:
+                exp_str = "长期有效"
+            elif diff_days <= 0:
+                exp_str = "已过期"
+
+        pct = 0
+        if real_t > 0:
+            pct = min(100, int((used_bytes / real_t) * 100))
+
+        return {
+            "used": format_bytes_smart(used_bytes),
+            "used_bytes": used_bytes,
+            "total": format_bytes_smart(real_t) if real_t > 0 else "",
+            "total_bytes": real_t,
+            "percent": pct,
+            "has_total": real_t > 0,
+            "expire": exp_str,
+            "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981")
+        }
+    except:
+        return None
+
+async def fetch_nezha_stats(session, nezha_url, nezha_token=""):
+    if not nezha_url or not aiohttp: return {}
+    nezha_url = nezha_url.strip().rstrip('/')
+    if not nezha_url.startswith('http'):
+        nezha_url = f"https://{nezha_url}"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    if nezha_token:
+        headers['Authorization'] = nezha_token.strip()
+
+    endpoints = [
+        f"{nezha_url}/api/v1/server/details",
+        f"{nezha_url}/api/v1/server/list"
+    ]
+    
+    servers_map = {}
+    for ep in endpoints:
+        try:
+            async with session.get(ep, headers=headers, timeout=aiohttp.ClientTimeout(total=8), ssl=False) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    raw_list = []
+                    if isinstance(data, dict):
+                        raw_list = data.get('data') or data.get('result') or []
+                    elif isinstance(data, list):
+                        raw_list = data
+                        
+                    for s in raw_list:
+                        if not isinstance(s, dict): continue
+                        sid = str(s.get('id', ''))
+                        name = str(s.get('name', ''))
+                        status_obj = s.get('status') or {}
+                        
+                        net_in = int(status_obj.get('NetInTransfer') or s.get('net_in_transfer') or 0)
+                        net_out = int(status_obj.get('NetOutTransfer') or s.get('net_out_transfer') or 0)
+                        total_transfer = net_in + net_out
+                        
+                        servers_map[sid] = {
+                            "name": name,
+                            "in": net_in,
+                            "out": net_out,
+                            "used": total_transfer
+                        }
+                    if servers_map:
+                        break
+        except Exception:
+            pass
+    return servers_map
 
 async def fetch_single_url(session, url, timeout):
     try:
@@ -1209,10 +1333,27 @@ async def async_process_subs():
             all_nodes = []
             sem = asyncio.Semaphore(int(cfg.get('threads', 8))) 
 
+            # 1. 如果配置了哪吒探针，异步拉取服务器实时网卡流量
+            nezha_servers = {}
+            nezha_url = cfg.get('nezha_url', '').strip()
+            nezha_token = cfg.get('nezha_token', '').strip()
+            if nezha_url and aiohttp:
+                try:
+                    async with aiohttp.ClientSession() as ns_session:
+                        nezha_servers = await fetch_nezha_stats(ns_session, nezha_url, nezha_token)
+                        if nezha_servers:
+                            write_log(f"Nezha Probe synced: {len(nezha_servers)} servers found")
+                except Exception as e:
+                    write_log(f"Nezha Probe sync error: {e}")
+
             async def process_single_sub(session, sub_item):
                 raw_text = sub_item.get('url', '')
                 tag = sub_item.get('tag', '')
                 enabled = sub_item.get('enabled', True)
+                quota_gb = 0
+                try: quota_gb = float(sub_item.get('quota_gb', 0) or 0)
+                except: quota_gb = 0
+                nezha_id = str(sub_item.get('nezha_id', '')).strip()
                 
                 lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
                 http_links = []; direct_nodes = []; raw_content_parts = []
@@ -1236,13 +1377,60 @@ async def async_process_subs():
                         except: pass
                         return "", None
                 
+                fetched_info = None
                 if http_links:
                     fetch_results = await asyncio.gather(*[fetch_job(u) for u in http_links], return_exceptions=True)
                     for item in fetch_results:
                         if isinstance(item, tuple) and len(item) == 2:
                             text, info = item
-                            if info and not sub_item.get('info'): sub_item['info'] = info
+                            if info and not fetched_info: fetched_info = info
                             if text: raw_content_parts.append(text)
+
+                # 流量计算：优先使用哪吒探针 -> 其次使用真实机场订阅信息 -> 自定义配额
+                if nezha_id and nezha_id in nezha_servers:
+                    ns = nezha_servers[nezha_id]
+                    used_bytes = ns['used']
+                    real_t = int(quota_gb * 1073741824) if quota_gb > 0 else 0
+                    pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
+                    sub_item['info'] = {
+                        "used": format_bytes_smart(used_bytes),
+                        "used_bytes": used_bytes,
+                        "total": format_bytes_smart(real_t) if real_t > 0 else "",
+                        "total_bytes": real_t,
+                        "percent": pct,
+                        "has_total": real_t > 0,
+                        "expire": "探针实时",
+                        "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981"),
+                        "source": "nezha"
+                    }
+                elif fetched_info:
+                    # 如果用户指定了该 VPS 的真实配额，使用用户设定的真实配额计算百分比
+                    if quota_gb > 0:
+                        real_t = int(quota_gb * 1073741824)
+                        used_b = fetched_info.get('used_bytes', 0)
+                        pct = min(100, int((used_b / real_t) * 100)) if real_t > 0 else 0
+                        fetched_info['total'] = format_bytes_smart(real_t)
+                        fetched_info['total_bytes'] = real_t
+                        fetched_info['percent'] = pct
+                        fetched_info['has_total'] = True
+                        fetched_info['color'] = "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981")
+                    sub_item['info'] = fetched_info
+                elif quota_gb > 0:
+                    # 纯自建 VPS 用户配置了总配额，无探针且无 HTTP 订阅
+                    sub_item['info'] = {
+                        "used": "VPS",
+                        "used_bytes": 0,
+                        "total": f"{quota_gb:.0f}GB",
+                        "total_bytes": int(quota_gb * 1073741824),
+                        "percent": 0,
+                        "has_total": True,
+                        "expire": "自建节点",
+                        "color": "#10b981",
+                        "source": "custom"
+                    }
+                else:
+                    # 普通 VPS 或无真实数据，直接清空，绝不展示虚假的 24TB 胶囊
+                    sub_item['info'] = None
 
                 if raw_content_parts:
                     combined_content = "\n".join(raw_content_parts)
@@ -1411,6 +1599,8 @@ def save():
     d['config']['ua'] = request.form.get('cfg_ua', 'v2rayNG/1.8.5')
     d['config']['sub_token'] = request.form.get('cfg_sub_token', '').strip() or get_current_password()
     d['config']['custom_groups'] = request.form.get('cfg_custom_groups', '').replace('，', ',')
+    d['config']['nezha_url'] = request.form.get('cfg_nezha_url', '').strip()
+    d['config']['nezha_token'] = request.form.get('cfg_nezha_token', '').strip()
     
     new_web_password = request.form.get('cfg_web_password', '').strip()
     if new_web_password:
@@ -1419,12 +1609,33 @@ def save():
     urls = request.form.getlist('sub_urls[]')
     tags = request.form.getlist('sub_tags[]')
     enables = request.form.getlist('sub_enables[]')
+    quotas = request.form.getlist('sub_quotas[]')
+    nezha_ids = request.form.getlist('sub_nezha_ids[]')
+
     new_subs = []
     for i, u in enumerate(urls):
         if u.strip():
             old_info = d['remote_subs'][i].get('info') if i < len(d['remote_subs']) else None
+            if isinstance(old_info, dict):
+                tot = str(old_info.get('total', ''))
+                exp = str(old_info.get('expire', ''))
+                if '24576' in tot or '26388' in tot or '270' in exp or '267' in exp:
+                    old_info = None
             is_enabled = (enables[i] == '1') if i < len(enables) else True
-            new_subs.append({"url": u.strip(), "tag": tags[i].strip(), "enabled": is_enabled, "info": old_info})
+            q_val = 0
+            if i < len(quotas) and quotas[i].strip():
+                try: q_val = float(quotas[i].strip())
+                except: q_val = 0
+            nid_val = nezha_ids[i].strip() if i < len(nezha_ids) else ""
+            
+            new_subs.append({
+                "url": u.strip(),
+                "tag": tags[i].strip(),
+                "enabled": is_enabled,
+                "quota_gb": q_val,
+                "nezha_id": nid_val,
+                "info": old_info
+            })
     d['remote_subs'] = new_subs
     save_data(d)
     threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": True}).start()
