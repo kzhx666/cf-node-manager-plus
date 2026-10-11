@@ -301,11 +301,31 @@ SMART_REGION_MAP = {
     r"(?i)(泰国|泰|Thailand|\bTH\b|\bTHA\b|曼谷|BKK)": "🇹🇭 泰国",
     r"(?i)(菲律宾|Philippines|\bPH\b|\bPHL\b|马尼拉|MNL)": "🇵🇭 菲律宾",
     r"(?i)(马来西亚|大马|Malaysia|\bMY\b|\bMYS\b|吉隆坡|KUL)": "🇲🇾 马来西亚",
+    r"(?i)(芬兰|芬蘭|Finland|\bFI\b|\bFIN\b|赫尔辛基|HEL)": "🇫🇮 芬兰",
     r"(?i)(印度尼西亚|印尼|Indonesia|\bID\b|\bIDN\b|雅加达|CGK)": "🇮🇩 印尼",
 }
 
 # 匹配 Unicode 国旗 Emoji（区域指示符号对）
 FLAG_EMOJI_REGEX = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
+
+def detect_country_info(text=""):
+    """智能识别文本中的国家名与国旗 Emoji，如 ('美国', '🇺🇸')"""
+    if not text: return "其他", "🌐"
+    text = str(text)
+    m = FLAG_EMOJI_REGEX.search(text)
+    if m:
+        flag = m.group(0)
+        for _, val in SMART_REGION_MAP.items():
+            parts = val.split(' ')
+            if parts[0] == flag:
+                return parts[1] if len(parts) > 1 else "其他", flag
+    for p, val in SMART_REGION_MAP.items():
+        if re.search(p, text):
+            parts = val.split(' ')
+            flag = parts[0]
+            name = parts[1] if len(parts) > 1 else "其他"
+            return name, flag
+    return "其他", "🌐"
 
 def get_node_flag(name="", tag="", server=""):
     """从节点名称、分组标签或服务器地址智能识别国旗 Emoji"""
@@ -1667,13 +1687,17 @@ async def async_process_subs():
                         k = v.get('uuid') or v.get('id') or v.get('name')
                         if k and k not in seen_nodes:
                             seen_nodes.add(k)
+                            p_name = str(v.get('name', ''))
+                            p_country, p_flag = detect_country_info(p_name)
                             unique_nodes_list.append({
                                 "uuid": str(v.get('uuid', '')),
                                 "id": str(v.get('id', '')),
-                                "name": str(v.get('name', '')),
+                                "name": p_name,
                                 "used": v.get('used', 0),
                                 "limit": v.get('limit', 0),
-                                "limit_gb": v.get('limit_gb', 0)
+                                "limit_gb": v.get('limit_gb', 0),
+                                "country": p_country,
+                                "flag": p_flag
                             })
                 d['cached_probe_nodes'] = unique_nodes_list
 
@@ -2126,13 +2150,17 @@ def api_probe_nodes():
                             k = v.get('uuid') or v.get('id') or v.get('name')
                             if k and k not in seen_nodes:
                                 seen_nodes.add(k)
+                                p_name = str(v.get('name', ''))
+                                p_country, p_flag = detect_country_info(p_name)
                                 unique_nodes_list.append({
                                     "uuid": str(v.get('uuid', '')),
                                     "id": str(v.get('id', '')),
-                                    "name": str(v.get('name', '')),
+                                    "name": p_name,
                                     "used": v.get('used', 0),
                                     "limit": v.get('limit', 0),
-                                    "limit_gb": v.get('limit_gb', 0)
+                                    "limit_gb": v.get('limit_gb', 0),
+                                    "country": p_country,
+                                    "flag": p_flag
                                 })
                     d['cached_probe_nodes'] = unique_nodes_list
                     save_data(d)
