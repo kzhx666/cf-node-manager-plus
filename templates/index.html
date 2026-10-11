@@ -1212,14 +1212,16 @@
                         
                         <div class="probe-header-status" onclick="event.stopPropagation(); triggerRowAutoMatch(this);" title="点击为此节点自动匹配探针">
                             {% set bound_p = sub.probe_id or sub.nezha_id or (sub.info and sub.info.matched_probe) %}
-                            {% if bound_p %}
+                            {% if bound_p and bound_p not in ['__none__', 'none', 'off', 'disable', 'disabled'] %}
                             <span class="probe-pill-matched" title="探针节点: {{ bound_p }}{% if sub.quota_gb %} (配额: {{ sub.quota_gb }}G){% endif %}">🎯 {{ bound_p }}{% if sub.quota_gb and not (sub.info and sub.info.used and sub.info.has_total) %} ({{ sub.quota_gb }}G){% endif %}</span>
+                            {% elif bound_p in ['__none__', 'none', 'off', 'disable', 'disabled'] %}
+                            <span class="probe-pill-unmatched" style="opacity: 0.55;" title="此节点已设置为不匹配探针 (纯订阅)">🚫 无探针</span>
                             {% else %}
                             <span class="probe-pill-unmatched">⚡ 自动匹配探针</span>
                             {% endif %}
                         </div>
                         
-                        {% if sub.info and sub.info.used %}
+                        {% if sub.info and sub.info.used and (bound_p not in ['__none__', 'none', 'off', 'disable', 'disabled'] or not sub.info.matched_probe) %}
                         <div class="traffic-pill" title="已用流量 / 总配额">
                             {% if sub.info.has_total and sub.info.total %}
                             <div class="traffic-progress-bar">
@@ -1259,13 +1261,16 @@
                                 <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
                                 <select name="sub_probe_ids[]" class="sub-probe-select" data-init-val="{{ sub.probe_id or sub.nezha_id or '' }}" onchange="onProbeSelectChange(this)" style="min-width: 200px; max-width: 320px; padding: 3px 8px; font-size: 0.78rem; background: var(--input-bg); color: var(--text); border: 1px solid var(--card-border); border-radius: var(--radius-sm); cursor: pointer;">
                                     <option value="">⚡ 留空自动容错匹配</option>
+                                    <option value="__none__" {% if (sub.probe_id or sub.nezha_id) in ['__none__', 'none', 'off', 'disable', 'disabled'] %}selected{% endif %}>🚫 不匹配探针 (纯订阅/无探针)</option>
                                     {% if sub.probe_id or sub.nezha_id %}
+                                    {% if (sub.probe_id or sub.nezha_id) not in ['__none__', 'none', 'off', 'disable', 'disabled'] %}
                                     <option value="{{ sub.probe_id or sub.nezha_id }}" selected>📌 当前已选: {{ sub.probe_id or sub.nezha_id }}</option>
+                                    {% endif %}
                                     {% endif %}
                                 </select>
                                 <button type="button" class="btn btn-ghost btn-sm" onclick="triggerItemAutoMatch(this)" style="padding: 2px 8px; font-size: 0.72rem; color: var(--primary);" title="智能推荐最相似探针">⚡ 智能推荐</button>
                                 <button type="button" class="btn btn-ghost btn-sm" onclick="promptCustomProbe(this)" style="padding: 2px 6px; font-size: 0.72rem; color: var(--text-sec);" title="手动输入自定义探针名或UUID">✏️ 自定义</button>
-                                {% if sub.info and sub.info.matched_probe %}
+                                {% if sub.info and sub.info.matched_probe and (sub.probe_id or sub.nezha_id) not in ['__none__', 'none', 'off', 'disable', 'disabled'] %}
                                 <span style="display: inline-flex; align-items: center; gap: 3px; font-size: 0.72rem; color: var(--success); background: var(--success-light); padding: 2px 6px; border-radius: var(--radius-sm); border: 1px solid rgba(16,185,129,0.25);" title="已成功关联探针节点">
                                     <span>✓ 关联: {{ sub.info.matched_probe }}</span>
                                 </span>
@@ -1871,6 +1876,17 @@
         return { country: "其他", flag: "🌐" };
     }
 
+    const JS_GENERIC_IGNORE_WORDS = new Set(['vless', 'vmess', 'trojan', 'ss', 'shadowsocks', 'hy2', 'hysteria', 'tuic', 'argo', 'link', 'sub', 'node', '节点', 'proxy', '本机', '优选', '直连', 'none', '__none__', 'off', 'disable', 'disabled']);
+
+    function isJsGenericOrSpecOnly(s) {
+        if (!s) return true;
+        s = String(s).trim().toLowerCase();
+        if (JS_GENERIC_IGNORE_WORDS.has(s)) return true;
+        if (/^\d+$/.test(s)) return true;
+        if (/^\d+c\d*g*$/.test(s)) return true;
+        return false;
+    }
+
     function cleanJsProbeStr(s) {
         if (!s) return "";
         let str = String(s).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').toLowerCase().trim();
@@ -1916,14 +1932,22 @@
         return false;
     }
 
-    function scoreJsProbeMatch(candRaw, probeEntry) {
+    function scoreJsProbeMatch(candRaw, probeEntry, isExplicitId = false) {
         if (!candRaw || !probeEntry) return 0;
-        const pName = String(probeEntry.name || '').trim();
-        const pUuid = String(probeEntry.uuid || '').toLowerCase().trim();
         const cRaw = String(candRaw).trim();
         const cLower = cRaw.toLowerCase();
 
+        if (['__none__', 'none', 'off', 'disable', 'disabled'].includes(cLower)) return 0;
+        if (!isExplicitId && isJsGenericOrSpecOnly(cLower)) return 0;
+
+        const pName = String(probeEntry.name || '').trim();
+        const pUuid = String(probeEntry.uuid || '').toLowerCase().trim();
+        const pId = String(probeEntry.id || '').toLowerCase().trim();
+
         if (pUuid && cLower === pUuid) return 1.0;
+        if (pId && cLower === pId) {
+            if (isExplicitId || pId.length >= 8) return 1.0;
+        }
         if (pName && cRaw === pName) return 1.0;
         if (pName && cLower === pName.toLowerCase()) return 0.98;
 
@@ -1939,7 +1963,7 @@
         if (cf.norm.includes(pf.norm) || pf.norm.includes(cf.norm)) {
             const shorter = Math.min(cf.norm.length, pf.norm.length);
             const longer = Math.max(cf.norm.length, pf.norm.length);
-            if (shorter >= 2) return 0.75 + 0.20 * (shorter / longer);
+            if (shorter >= 3) return 0.75 + 0.20 * (shorter / longer);
         }
 
         if (cf.core && pf.core && (cf.core.includes(pf.core) || pf.core.includes(cf.core))) {
@@ -1956,9 +1980,17 @@
         const statusEl = item.querySelector('.probe-header-status');
         if (!statusEl) return;
         const trafficPill = item.querySelector('.traffic-pill');
-        if (probeName) {
+        if (['__none__', 'none', 'off', 'disable', 'disabled'].includes(String(probeName || '').toLowerCase())) {
+            statusEl.innerHTML = `<span class="probe-pill-unmatched" style="opacity: 0.55;" title="此节点已设置为不匹配探针 (纯订阅)">🚫 无探针</span>`;
+            if (trafficPill) {
+                trafficPill.style.display = 'none';
+            }
+        } else if (probeName) {
             const quotaTxt = (!trafficPill && quotaGb) ? ` (${quotaGb}G)` : '';
             statusEl.innerHTML = `<span class="probe-pill-matched" title="探针节点: ${probeName}${quotaGb ? ' (配额: ' + quotaGb + 'G)' : ''}">🎯 ${probeName}${quotaTxt}</span>`;
+            if (trafficPill) {
+                trafficPill.style.display = '';
+            }
         } else {
             statusEl.innerHTML = `<span class="probe-pill-unmatched" title="点击展开并选择同国家探针">⚡ 自动匹配探针</span>`;
         }
@@ -1996,6 +2028,8 @@
         });
 
         let html = `<option value="">⚡ 留空自动容错匹配 (未绑定)</option>`;
+        const isNoneSel = ['__none__', 'none', 'off', 'disable', 'disabled'].includes(currentVal.toLowerCase());
+        html += `<option value="__none__" ${isNoneSel ? 'selected' : ''}>🚫 不匹配探针 (纯订阅/无探针)</option>`;
 
         if (sameCountryList.length > 0) {
             html += `<optgroup label="${subFlag} 同国家探针 (${subCountry} - 优先推荐 ${sameCountryList.length}个)">`;
@@ -2018,8 +2052,8 @@
             html += `</optgroup>`;
         }
 
-        // 若当前值不在探针列表内（如用户手输的历史自定义名称/UUID），保留展示
-        if (currentVal && !sameCountryList.some(p => p.name === currentVal || p.uuid === currentVal) && !otherCountryList.some(p => p.name === currentVal || p.uuid === currentVal)) {
+        // 若当前值不在探针列表内且不是特殊选项（如用户手输的历史自定义名称/UUID），保留展示
+        if (currentVal && !isNoneSel && !sameCountryList.some(p => p.name === currentVal || p.uuid === currentVal) && !otherCountryList.some(p => p.name === currentVal || p.uuid === currentVal)) {
             html += `<optgroup label="📌 当前已选自定义">`;
             html += `<option value="${currentVal}" selected>${currentVal}</option>`;
             html += `</optgroup>`;
@@ -2027,7 +2061,7 @@
 
         selectEl.innerHTML = html;
         if (currentVal) {
-            selectEl.value = currentVal;
+            selectEl.value = isNoneSel ? '__none__' : currentVal;
         }
     }
 
@@ -2044,7 +2078,10 @@
         const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
         
         let quotaGb = 0;
-        if (selectedVal) {
+        if (['__none__', 'none', 'off', 'disable', 'disabled'].includes(selectedVal.toLowerCase())) {
+            updateRowProbeBadge(item, '__none__', 0);
+            showToast('已设为不匹配探针 (纯订阅/无探针模式)', '🚫');
+        } else if (selectedVal) {
             const selOpt = selectEl.selectedOptions[0];
             if (selOpt && selOpt.dataset.quota) {
                 quotaGb = parseFloat(selOpt.dataset.quota) || 0;
@@ -2308,10 +2345,13 @@
         const selectEl = item.querySelector('.sub-probe-select');
         if (!selectEl) return;
         
+        // 🌟 若用户明确选择了“不匹配探针”(__none__)，严格跳过！
+        if (['__none__', 'none', 'off', 'disable', 'disabled'].includes((selectEl.value || '').toLowerCase())) return;
+        
         // 若当前未手动选择特定探针，则执行智能推荐匹配
         if (!selectEl.value.trim()) {
             const tagVal = tagInput.value.trim();
-            if (!tagVal || !window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) return;
+            if (!tagVal || isJsGenericOrSpecOnly(tagVal) || !window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) return;
             
             let best = null, bestScore = 0;
             for (const p of window.CACHED_PROBE_NODES) {
@@ -2321,7 +2361,7 @@
                     best = p;
                 }
             }
-            if (best && bestScore >= 0.65) {
+            if (best && bestScore >= 0.78) {
                 selectEl.value = best.name;
                 onProbeSelectChange(selectEl);
             }
@@ -2376,17 +2416,22 @@
             return;
         }
         let candidates = [];
-        if (tagName) candidates.push(tagName);
+        if (tagName && !isJsGenericOrSpecOnly(tagName)) candidates.push(tagName);
         if (rawContent) {
             const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
             if (hashMatches) hashMatches.forEach(m => {
-                try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
+                try {
+                    const dec = decodeURIComponent(m.substring(1));
+                    if (!isJsGenericOrSpecOnly(dec)) candidates.push(dec);
+                } catch(e){
+                    if (!isJsGenericOrSpecOnly(m.substring(1))) candidates.push(m.substring(1));
+                }
             });
         }
         
         let best = null, bestScore = 0;
         for (const cand of candidates) {
-            if (!cand) continue;
+            if (!cand || isJsGenericOrSpecOnly(cand)) continue;
             for (const p of window.CACHED_PROBE_NODES) {
                 const score = scoreJsProbeMatch(cand, p);
                 if (score > bestScore) {
@@ -2396,13 +2441,13 @@
             }
         }
         
-        if (best && bestScore >= 0.65) {
+        if (best && bestScore >= 0.78) {
             if (selectEl) {
                 selectEl.value = best.name;
                 onProbeSelectChange(selectEl);
             }
         } else {
-            showToast('未找到高相似度探针，已在下拉选项中为您置顶同国家探针供选择', 'ℹ️');
+            showToast('未找到高置信度探针，未强制匹配', 'ℹ️');
         }
     }
 
@@ -2429,6 +2474,12 @@
                         const selectEl = item.querySelector('.sub-probe-select');
                         const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
                         const tag = tagInput ? tagInput.value.trim() : '';
+                        
+                        // 若用户显式设为不匹配探针，保持不匹配
+                        if (selectEl && ['__none__', 'none', 'off', 'disable', 'disabled'].includes((selectEl.value || '').toLowerCase())) {
+                            updateRowProbeBadge(item, '__none__', 0);
+                            return;
+                        }
                         
                         if (detailsMap[tag]) {
                             const matchInfo = detailsMap[tag];
@@ -2469,23 +2520,31 @@
         items.forEach(item => {
             const tagInput = item.querySelector('input[name="sub_tags[]"]');
             const selectEl = item.querySelector('.sub-probe-select');
+            if (selectEl && ['__none__', 'none', 'off', 'disable', 'disabled'].includes((selectEl.value || '').toLowerCase())) {
+                return;
+            }
             const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
             const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
             
             const tagName = tagInput ? tagInput.value.trim() : '';
             const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
             let candidates = [];
-            if (tagName) candidates.push(tagName);
+            if (tagName && !isJsGenericOrSpecOnly(tagName)) candidates.push(tagName);
             if (rawContent) {
                 const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
                 if (hashMatches) hashMatches.forEach(m => {
-                    try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
+                    try {
+                        const dec = decodeURIComponent(m.substring(1));
+                        if (!isJsGenericOrSpecOnly(dec)) candidates.push(dec);
+                    } catch(e){
+                        if (!isJsGenericOrSpecOnly(m.substring(1))) candidates.push(m.substring(1));
+                    }
                 });
             }
             
             let best = null, bestScore = 0;
             for (const cand of candidates) {
-                if (!cand) continue;
+                if (!cand || isJsGenericOrSpecOnly(cand)) continue;
                 for (const p of window.CACHED_PROBE_NODES) {
                     const score = scoreJsProbeMatch(cand, p);
                     if (score > bestScore) {
@@ -2494,7 +2553,7 @@
                     }
                 }
             }
-            if (best && bestScore >= 0.65) {
+            if (best && bestScore >= 0.78) {
                 if (selectEl) {
                     selectEl.value = best.name;
                     onProbeSelectChange(selectEl);
@@ -2544,6 +2603,7 @@
                         <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
                         <select name="sub_probe_ids[]" class="sub-probe-select" onchange="onProbeSelectChange(this)" style="min-width: 200px; max-width: 320px; padding: 3px 8px; font-size: 0.78rem; background: var(--input-bg); color: var(--text); border: 1px solid var(--card-border); border-radius: var(--radius-sm); cursor: pointer;">
                             <option value="">⚡ 留空自动容错匹配</option>
+                            <option value="__none__">🚫 不匹配探针 (纯订阅/无探针)</option>
                         </select>
                         <button type="button" class="btn btn-ghost btn-sm" onclick="triggerItemAutoMatch(this)" style="padding: 2px 8px; font-size: 0.72rem; color: var(--primary);" title="智能推荐最相似探针">⚡ 智能推荐</button>
                         <button type="button" class="btn btn-ghost btn-sm" onclick="promptCustomProbe(this)" style="padding: 2px 6px; font-size: 0.72rem; color: var(--text-sec);" title="手动输入自定义探针名或UUID">✏️ 自定义</button>

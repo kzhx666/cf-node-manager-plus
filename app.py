@@ -782,7 +782,22 @@ def check_probe_prefix_conflict(s1, s2):
                     return True # 商家冲突
     return False
 
-def score_probe_match(candidate, probe_entry):
+GENERIC_IGNORE_WORDS = {
+    'vless', 'vmess', 'trojan', 'ss', 'shadowsocks', 'hy2', 'hysteria', 'tuic', 
+    'argo', 'link', 'sub', 'node', '节点', 'proxy', '本机', '优选', '直连',
+    'none', '__none__', 'off', 'disable', 'disabled'
+}
+
+def is_generic_or_spec_only(s):
+    """过滤无辨识度的候选词（如纯数字ID、配置规格4c8g、通用协议词、不匹配标记等）"""
+    if not s: return True
+    s = str(s).strip().lower()
+    if s in GENERIC_IGNORE_WORDS: return True
+    if s.isdigit(): return True
+    if re.match(r'^\d+c\d*g*$', s): return True
+    return False
+
+def score_probe_match(candidate, probe_entry, is_explicit_id=False):
     """
     计算候选字符串与探针节点的容错匹配度得分 (0.0 ~ 1.0)
     支持：
@@ -797,13 +812,17 @@ def score_probe_match(candidate, probe_entry):
     cand_raw = str(candidate).strip()
     cand_lower = cand_raw.lower()
     
+    if cand_lower in ('__none__', 'none', 'off', 'disable', 'disabled'): return 0.0
+    if not is_explicit_id and is_generic_or_spec_only(cand_lower): return 0.0
+    
     node_name = str(probe_entry.get('name', '')).strip()
     node_uuid = str(probe_entry.get('uuid', '')).strip().lower()
     node_id = str(probe_entry.get('id', '')).strip().lower()
     
     # 1. 绝对精确匹配 (UUID 或 ID)
     if node_uuid and cand_lower == node_uuid: return 1.0
-    if node_id and cand_lower == node_id: return 1.0
+    if node_id and cand_lower == node_id:
+        if is_explicit_id or len(node_id) >= 8: return 1.0
     if node_name and cand_raw == node_name: return 1.0
     if node_name and cand_lower == node_name.lower(): return 0.98
         
@@ -828,7 +847,7 @@ def score_probe_match(candidate, probe_entry):
     if c_norm in n_norm or n_norm in c_norm:
         shorter = min(len(c_norm), len(n_norm))
         longer = max(len(c_norm), len(n_norm))
-        if shorter >= 2:
+        if shorter >= 3:
             return 0.75 + 0.20 * (shorter / longer)
             
     # 5. 核心词包含关系
@@ -843,12 +862,12 @@ def score_probe_match(candidate, probe_entry):
     sim1 = difflib.SequenceMatcher(None, c_norm, n_norm).ratio()
     sim2 = difflib.SequenceMatcher(None, c_core, n_core).ratio() if c_core and n_core else 0
     sim = max(sim1, sim2)
-    if sim >= 0.58:
-        return 0.55 + 0.35 * sim
+    if sim >= 0.75:
+        return 0.60 + 0.35 * sim
         
     return 0.0
 
-def find_best_probe_node(candidates, probe_servers, min_threshold=0.65):
+def find_best_probe_node(candidates, probe_servers, min_threshold=0.78, is_explicit_id=False):
     """
     在一组候选文本（用户指定ID、订阅分组名、节点名等）中，
     对所有探针节点计算容错匹配度，返回最佳匹配的探针节点 entry, 得分, 以及命中的候选词
@@ -870,12 +889,14 @@ def find_best_probe_node(candidates, probe_servers, min_threshold=0.65):
     
     for cand in candidates:
         if not cand or not str(cand).strip(): continue
+        cand_str = str(cand).strip()
+        if not is_explicit_id and is_generic_or_spec_only(cand_str): continue
         for entry in unique_nodes:
-            score = score_probe_match(cand, entry)
+            score = score_probe_match(cand_str, entry, is_explicit_id=is_explicit_id)
             if score > best_score:
                 best_score = score
                 best_entry = entry
-                matched_cand = str(cand).strip()
+                matched_cand = cand_str
                 
     if best_score >= min_threshold:
         return best_entry, best_score, matched_cand
@@ -1816,32 +1837,39 @@ async def async_process_subs():
                 matched_probe = None
                 matched_name = ""
                 auto_matched = False
+                is_probe_disabled = probe_id.lower() in ('__none__', 'none', 'off', 'disable', 'disabled')
                 
-                if probe_servers:
+                if is_probe_disabled:
+                    sub_item['probe_id'] = '__none__'
+                    sub_item['nezha_id'] = '__none__'
+                    matched_probe = None
+                    if old_info and isinstance(old_info, dict) and old_info.get('matched_probe'):
+                        old_info = None
+                elif probe_servers:
                     # 1. 优先使用用户手动填写的绑定进行容错匹配
                     if probe_id:
-                        matched_probe, score, mc = find_best_probe_node([probe_id], probe_servers, min_threshold=0.65)
+                        matched_probe, score, mc = find_best_probe_node([probe_id], probe_servers, min_threshold=0.78, is_explicit_id=True)
                     
-                    # 2. 如果用户未手动填写，或手动填写未匹配，执行自动智能容错匹配
-                    if not matched_probe:
+                    # 2. 只有在用户未手动填写(留空)时，才执行自动智能容错匹配
+                    if not matched_probe and not probe_id:
                         auto_cands = []
-                        if tag:
+                        if tag and not is_generic_or_spec_only(tag):
                             auto_cands.append(tag)
                             stripped_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
-                            if stripped_argo and stripped_argo != tag:
+                            if stripped_argo and stripped_argo != tag and not is_generic_or_spec_only(stripped_argo):
                                 auto_cands.append(stripped_argo)
                         for dn in direct_nodes[:6]:
-                            if dn.get('name'):
-                                auto_cands.append(dn.get('name'))
-                                dn_no_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', dn.get('name'), flags=re.IGNORECASE).strip()
-                                if dn_no_argo and dn_no_argo != dn.get('name'):
+                            dn_name = dn.get('name')
+                            if dn_name and not is_generic_or_spec_only(dn_name):
+                                auto_cands.append(dn_name)
+                                dn_no_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', dn_name, flags=re.IGNORECASE).strip()
+                                if dn_no_argo and dn_no_argo != dn_name and not is_generic_or_spec_only(dn_no_argo):
                                     auto_cands.append(dn_no_argo)
                         
-                        matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.65)
+                        matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.78, is_explicit_id=False)
                         if matched_probe:
                             auto_matched = True
                             matched_name = matched_probe.get('name') or matched_probe.get('uuid') or ''
-                            # 自动匹配成功且原先未填写时，将匹配到的探针名字直接填入 probe_id，让用户在界面看得到
                             if not probe_id:
                                 sub_item['probe_id'] = matched_name
                                 sub_item['nezha_id'] = matched_name
@@ -1873,6 +1901,21 @@ async def async_process_subs():
                         "matched_probe": matched_name,
                         "auto_matched": auto_matched
                     }
+                elif is_probe_disabled:
+                    # 显式不匹配探针：若有真实机场订阅信息保留，否则清空虚假探针流量
+                    if fetched_info:
+                        if quota_gb > 0:
+                            real_t = int(quota_gb * 1073741824)
+                            used_b = fetched_info.get('used_bytes', 0)
+                            pct = min(100, int((used_b / real_t) * 100)) if real_t > 0 else 0
+                            fetched_info['total'] = format_bytes_smart(real_t)
+                            fetched_info['total_bytes'] = real_t
+                            fetched_info['percent'] = pct
+                            fetched_info['has_total'] = True
+                            fetched_info['color'] = "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981")
+                        sub_item['info'] = fetched_info
+                    else:
+                        sub_item['info'] = None
                 elif fetched_info:
                     # 如果用户指定了该 VPS 的真实配额，使用用户设定的真实配额计算百分比
                     if quota_gb > 0:
@@ -1951,13 +1994,15 @@ async def async_process_subs():
                 sub_probe_map = {s.get('tag', ''): (s.get('probe_id') or s.get('nezha_id')) for s in subs if s.get('tag') and (s.get('probe_id') or s.get('nezha_id'))}
                 for ls in latest_subs:
                     ltag = ls.get('tag', '')
-                    if ltag in sub_info_map and sub_info_map[ltag] is not None:
+                    if ltag in sub_info_map:
                         ls['info'] = sub_info_map[ltag]
                     if ltag in sub_quota_map and sub_quota_map[ltag]:
                         ls['quota_gb'] = sub_quota_map[ltag]
-                    if ltag in sub_probe_map and sub_probe_map[ltag] and not (ls.get('probe_id') or ls.get('nezha_id')):
-                        ls['probe_id'] = sub_probe_map[ltag]
-                        ls['nezha_id'] = sub_probe_map[ltag]
+                    if ltag in sub_probe_map:
+                        p_val = sub_probe_map[ltag]
+                        if p_val and (not (ls.get('probe_id') or ls.get('nezha_id')) or p_val == '__none__'):
+                            ls['probe_id'] = p_val
+                            ls['nezha_id'] = p_val
                 
                 latest_d['remote_subs'] = latest_subs
                 latest_d['cached_nodes'] = valid_nodes
@@ -2133,6 +2178,10 @@ def save():
                 try: q_val = float(quotas[i].strip())
                 except: q_val = 0
             pid_val = probe_ids[i].strip() if i < len(probe_ids) else ""
+            if pid_val.lower() in ('__none__', 'none', 'off', 'disable', 'disabled'):
+                pid_val = '__none__'
+                if isinstance(old_info, dict) and old_info.get('matched_probe'):
+                    old_info = None
             
             new_subs.append({
                 "url": u.strip(),
@@ -2447,24 +2496,31 @@ def api_auto_match_all():
         try: current_quota = float(sub.get('quota_gb', 0) or 0)
         except: current_quota = 0
         
+        # 🌟 关键：如果用户已明确指定“不匹配探针”(__none__)，严格跳过！
+        if current_probe.lower() in ('__none__', 'none', 'off', 'disable', 'disabled'):
+            sub['probe_id'] = '__none__'
+            sub['nezha_id'] = '__none__'
+            if sub.get('info') and sub['info'].get('matched_probe'):
+                sub['info'] = None
+            continue
+        
         cands = []
-        if current_probe: cands.append(current_probe)
-        if tag:
+        if tag and not is_generic_or_spec_only(tag):
             cands.append(tag)
             stripped_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
-            if stripped_argo and stripped_argo != tag:
+            if stripped_argo and stripped_argo != tag and not is_generic_or_spec_only(stripped_argo):
                 cands.append(stripped_argo)
         for line in raw_text.splitlines():
             line = line.strip()
             if '#' in line:
                 m_part = line.split('#')[-1].split('&')[0].strip()
-                if m_part:
+                if m_part and not is_generic_or_spec_only(m_part):
                     cands.append(m_part)
                     m_no_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', m_part, flags=re.IGNORECASE).strip()
-                    if m_no_argo and m_no_argo != m_part:
+                    if m_no_argo and m_no_argo != m_part and not is_generic_or_spec_only(m_no_argo):
                         cands.append(m_no_argo)
                 
-        best_e, score, mc = find_best_probe_node(cands, probe_servers, min_threshold=0.65)
+        best_e, score, mc = find_best_probe_node(cands, probe_servers, min_threshold=0.78, is_explicit_id=False)
         if best_e:
             matched_name = best_e.get('name') or best_e.get('uuid') or ''
             sub['probe_id'] = matched_name
@@ -2501,6 +2557,13 @@ def api_auto_match_all():
                 "quota_gb": sub.get('quota_gb', 0),
                 "score": round(score, 3)
             })
+        else:
+            # 未匹配到高置信度探针：若此前是自动匹配残留的，清除错误探针数据
+            if sub.get('info') and sub['info'].get('auto_matched'):
+                sub['info'] = None
+                if not current_probe:
+                    sub['probe_id'] = ''
+                    sub['nezha_id'] = ''
             
     d['remote_subs'] = subs
     save_data(d)
