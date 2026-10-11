@@ -1,0 +1,1600 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CF 优选 Pro - 节点管理与多客户端订阅中心</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #090d16;
+            --bg-elevated: #111827;
+            --card-bg: rgba(17, 24, 39, 0.85);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-hover-border: rgba(99, 102, 241, 0.4);
+            --text: #f3f4f6;
+            --text-sec: #9ca3af;
+            --text-muted: #6b7280;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-light: rgba(99, 102, 241, 0.15);
+            --success: #10b981;
+            --success-light: rgba(16, 185, 129, 0.15);
+            --danger: #ef4444;
+            --danger-light: rgba(239, 68, 68, 0.15);
+            --warning: #f59e0b;
+            --warning-light: rgba(245, 158, 11, 0.15);
+            --info: #0ea5e9;
+            --info-light: rgba(14, 165, 233, 0.15);
+            --input-bg: #1f2937;
+            --input-border: #374151;
+            --radius-lg: 16px;
+            --radius-md: 10px;
+            --radius-sm: 6px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.25);
+        }
+
+        [data-theme="light"] {
+            --bg: #f8fafc;
+            --bg-elevated: #ffffff;
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --card-border: #e2e8f0;
+            --card-hover-border: rgba(99, 102, 241, 0.5);
+            --text: #0f172a;
+            --text-sec: #475569;
+            --text-muted: #94a3b8;
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --primary-light: rgba(79, 70, 229, 0.1);
+            --success: #059669;
+            --success-light: rgba(5, 150, 105, 0.1);
+            --danger: #dc2626;
+            --danger-light: rgba(220, 38, 38, 0.1);
+            --warning: #d97706;
+            --warning-light: rgba(217, 119, 6, 0.1);
+            --info: #0284c7;
+            --info-light: rgba(2, 132, 199, 0.1);
+            --input-bg: #ffffff;
+            --input-border: #cbd5e1;
+            --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.08);
+            --shadow-glow: 0 0 20px rgba(79, 70, 229, 0.15);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding: 24px 16px;
+            min-height: 100vh;
+            line-height: 1.5;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            display: grid;
+            gap: 20px;
+        }
+
+        /* Top Navbar */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0 10px 0;
+        }
+        .brand-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #f97316, #6366f1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+        }
+        .brand-title {
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .brand-title span {
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .version-badge {
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 20px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .nav-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        /* Hero Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .stat-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card:hover {
+            border-color: var(--card-hover-border);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .stat-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-sec);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .stat-icon {
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+        .stat-value {
+            font-size: 1.65rem;
+            font-weight: 800;
+            color: var(--text);
+            line-height: 1.2;
+        }
+        .stat-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        /* Generic Card */
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.01);
+        }
+        .card-title {
+            font-weight: 700;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-body {
+            padding: 20px;
+        }
+
+        /* Buttons & Forms */
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--input-border);
+            background: var(--input-bg);
+            color: var(--text);
+            font-size: 0.92rem;
+            outline: none;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+        textarea {
+            font-family: 'JetBrains Mono', monospace;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 9px 16px;
+            border-radius: var(--radius-md);
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+        .btn-ghost {
+            background: transparent;
+            border-color: var(--card-border);
+            color: var(--text);
+        }
+        .btn-ghost:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--text-sec);
+        }
+        .btn-success {
+            background: var(--success);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        .btn-success:hover { background: #059669; }
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            border-radius: var(--radius-sm);
+        }
+        .btn-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--card-border);
+            background: transparent;
+            color: var(--text-sec);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+        }
+        .btn-icon:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            border-color: var(--text-sec);
+        }
+
+        /* Subscription List Items */
+        .sub-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.1);
+        }
+        .sub-item {
+            background: var(--bg-elevated);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        .sub-item:hover {
+            border-color: var(--card-hover-border);
+            box-shadow: var(--shadow-sm);
+        }
+        .sub-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 14px;
+            gap: 12px;
+            cursor: pointer;
+        }
+        .sub-handle {
+            color: var(--text-muted);
+            cursor: grab;
+            font-size: 1.1rem;
+            user-select: none;
+        }
+        .sub-name-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text);
+            padding: 4px 0;
+            outline: none;
+            border-bottom: 2px solid transparent;
+            transition: 0.2s;
+        }
+        .sub-name-input:focus {
+            border-bottom-color: var(--primary);
+        }
+        .traffic-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 10px;
+            background: var(--input-bg);
+            border-radius: 20px;
+            font-size: 0.78rem;
+            color: var(--text-sec);
+            border: 1px solid var(--card-border);
+        }
+        .traffic-progress-bar {
+            width: 48px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .traffic-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+        .sub-body {
+            padding: 14px;
+            border-top: 1px solid var(--card-border);
+            background: rgba(0, 0, 0, 0.15);
+            display: none;
+        }
+        .sub-body.show {
+            display: block;
+            animation: slideDown 0.2s ease-out;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            width: 42px;
+            height: 24px;
+            display: inline-block;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--input-border);
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+            background-color: white; transition: .3s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        /* Chips & Filter Bar */
+        .group-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.84rem;
+            cursor: pointer;
+            border: 1px solid var(--card-border);
+            background: var(--bg-elevated);
+            color: var(--text-sec);
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .chip:hover {
+            border-color: var(--primary);
+            color: var(--text);
+            transform: translateY(-1px);
+        }
+        .chip.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+        }
+        .chip-count {
+            margin-left: 6px;
+            font-size: 0.72rem;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+
+        /* Subscription Cards */
+        .export-grid {
+            display: grid;
+            gap: 16px;
+        }
+        .export-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .export-card.singbox { border-left: 4px solid #10b981; }
+        .export-card.clash { border-left: 4px solid #6366f1; }
+        .export-card.v2ray { border-left: 4px solid #f59e0b; }
+        .export-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .export-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .export-badge {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-sec);
+        }
+        .export-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .export-input {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            background: var(--bg);
+            cursor: pointer;
+            padding: 8px 12px;
+        }
+        .export-btn-group {
+            display: flex;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* Floating Save Bar */
+        .fab-bar {
+            position: sticky;
+            bottom: 24px;
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            padding: 12px 24px;
+            border-radius: 50px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--card-hover-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 99;
+            margin-top: 24px;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            gap: 20px;
+            animation: bounceIn 0.3s ease-out;
+        }
+        @keyframes bounceIn {
+            from { transform: translateY(15px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Modals */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .modal-content {
+            background: var(--bg-elevated);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 650px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: var(--shadow-md);
+            animation: modalPop 0.25s ease-out;
+        }
+        @keyframes modalPop {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .modal-footer {
+            padding: 14px 20px;
+            border-top: 1px solid var(--card-border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Toast */
+        #toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--primary);
+            color: var(--text);
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: var(--shadow-glow);
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+            z-index: 3000;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Custom scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .collapsible-content {
+            display: none;
+            padding-top: 14px;
+        }
+        .collapsible-content.show {
+            display: block;
+        }
+
+        /* Protocol badge */
+        .proto-badge {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .proto-vless { background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+        .proto-vmess { background: rgba(14, 165, 233, 0.2); color: #38bdf8; }
+        .proto-trojan { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+        .proto-hysteria2, .proto-hy2 { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+        .proto-tuic { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+        .proto-ss { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+        .proto-other { background: rgba(156, 163, 175, 0.2); color: #d1d5db; }
+    </style>
+</head>
+<body>
+
+<div id="toast"><span id="toast-icon">✨</span><span id="toast-msg">提示消息</span></div>
+
+{% if not authorized %}
+<div style="min-height: 90vh; display: flex; align-items: center; justify-content: center;">
+    <div class="card" style="width: 100%; max-width: 380px; padding: 32px 28px; text-align: center;">
+        <div class="brand-icon" style="margin: 0 auto 16px; width: 48px; height: 48px; font-size: 1.5rem;">⚡</div>
+        <h2 style="font-weight: 800; font-size: 1.4rem; margin-bottom: 6px;">CF 优选 Pro 面板</h2>
+        <p style="color: var(--text-sec); font-size: 0.85rem; margin-bottom: 24px;">请输入管理员访问密码以继续</p>
+        <form method="POST">
+            <input type="password" name="password" placeholder="输入访问密码..." style="margin-bottom: 16px; padding: 12px;" required autofocus>
+            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 0.95rem;">解锁登录</button>
+        </form>
+    </div>
+</div>
+{% else %}
+
+<div class="container">
+    <!-- Navbar -->
+    <div class="navbar">
+        <div class="brand-wrapper">
+            <div class="brand-icon">⚡</div>
+            <div class="brand-title">CF<span>优选Pro</span></div>
+            <div class="version-badge">v43.00</div>
+        </div>
+        <div class="nav-actions">
+            <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="切换明暗主题">🌓 主题</button>
+            <a href="/logout" class="btn btn-ghost btn-sm" title="退出管理" style="color: var(--danger);">退出</a>
+        </div>
+    </div>
+
+    <!-- Hero Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card" onclick="showNodePreview()">
+            <div class="stat-header">
+                <span class="stat-label">可用节点池</span>
+                <span class="stat-icon">🌐</span>
+            </div>
+            <div class="stat-value" id="node-count-val">{{ node_count }}</div>
+            <div class="stat-sub">点击查看 / 筛选节点</div>
+        </div>
+
+        <div class="stat-card" onclick="document.getElementById('ips_area').focus()">
+            <div class="stat-header">
+                <span class="stat-label">优选 IP 库</span>
+                <span class="stat-icon">📡</span>
+            </div>
+            <div class="stat-value" id="ip-count-val">--</div>
+            <div class="stat-sub">已载入有效 IP 库</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-header">
+                <span class="stat-label">自动同步倒计时</span>
+                <span class="stat-icon">⏱️</span>
+            </div>
+            <div class="stat-value" id="timer" style="font-size: 1.35rem;">--:--</div>
+            <div class="stat-sub" style="justify-content: space-between;">
+                <span style="display:flex; align-items:center; gap:6px;"><span class="pulse-dot" id="sync-dot"></span><span id="sync-status-txt">空闲就绪</span></span>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="triggerSyncAll()" style="padding: 2px 6px; font-size: 0.72rem;">立即同步</button>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-header">
+                <span class="stat-label">订阅源配置</span>
+                <span class="stat-icon">📦</span>
+            </div>
+            <div class="stat-value">{{ data.remote_subs|length }}</div>
+            <div class="stat-sub">维护的上游节点来源</div>
+        </div>
+    </div>
+
+    <!-- Main Configuration Form -->
+    <form method="POST" action="/save" id="mainForm">
+        <!-- CF 优选 IP 库 Card -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">📡 Cloudflare 优选 IP 库</span>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openSpeedTestModal()">📋 测速导入</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="dedupIPs()">✨ 一键去重</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+                    <input type="text" id="api_url" name="cf_api_url" value="{{ data.cf_api_url }}" placeholder="测速 API 链接 / 优选域名（留空可手动维护下方 IP 列表）">
+                    <button type="button" class="btn btn-primary" onclick="updateIPs()" style="flex-shrink:0;">⚡ 抓取 API</button>
+                </div>
+                
+                <textarea name="ips" id="ips_area" rows="4" placeholder="每行一个 IP 或 IP:端口，如：&#10;104.16.1.1&#10;172.67.1.1:8443&#10;[2606:4700::1]:443">{{ data.ips }}</textarea>
+                
+                <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: var(--text-sec);">
+                        <span>每个节点替换 IP 副本数:</span>
+                        <select name="max_ips_per_node" style="width: auto; padding: 4px 8px;">
+                            <option value="0" {% if data.max_ips_per_node==0 %}selected{% endif %}>全部 IP 展开</option>
+                            <option value="3" {% if data.max_ips_per_node==3 %}selected{% endif %}>每个节点 3 个</option>
+                            <option value="5" {% if data.max_ips_per_node==5 %}selected{% endif %}>每个节点 5 个 (推荐)</option>
+                            <option value="10" {% if data.max_ips_per_node==10 %}selected{% endif %}>每个节点 10 个</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="clearIPs()">🧹 清空列表</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="resetDefaultIPs()">🔄 官方默认 IP</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 订阅源列表 Card -->
+        <div class="card" style="margin-top: 16px;">
+            <div class="card-header">
+                <span class="card-title">🔗 节点与订阅源列表</span>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(true)">✅ 全选启用</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(false)">⏸️ 全选停用</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="addSub()">+ 添加订阅</button>
+                </div>
+            </div>
+            
+            <div id="sub-list" class="sub-list">
+                {% for sub in data.remote_subs %}
+                <div class="sub-item" data-index="{{ loop.index0 }}">
+                    <div class="sub-header" onclick="toggleBody(this)">
+                        <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
+                        <input name="sub_tags[]" class="sub-name-input" value="{{ sub.tag }}" placeholder="未命名节点分组" onclick="event.stopPropagation()">
+                        
+                        {% if sub.info %}
+                        <div class="traffic-pill" title="已用流量 / 总配额">
+                            <div class="traffic-progress-bar">
+                                <div class="traffic-progress-fill" style="width: {{ sub.info.percent }}%; background: {{ sub.info.color }};"></div>
+                            </div>
+                            <span>{{ sub.info.used }} / {{ sub.info.total }}</span>
+                            <span style="opacity: 0.7;">({{ sub.info.expire }})</span>
+                        </div>
+                        {% endif %}
+
+                        <div class="actions" onclick="event.stopPropagation()" style="display: flex; gap: 4px; align-items: center;">
+                            <button type="button" class="btn-icon" onclick="syncSingle({{ loop.index0 }})" title="单独刷新此订阅">🔄</button>
+                            <button type="button" class="btn-icon" onclick="moveTop(this)" title="置顶">⬆️</button>
+                            <button type="button" class="btn-icon" onclick="moveBottom(this)" title="置底">⬇️</button>
+                            <button type="button" class="btn-icon" onclick="toggleBody(this.closest('.sub-header'))" title="展开配置">✏️</button>
+                            <button type="button" class="btn-icon" onclick="removeSub(this)" title="删除" style="color: var(--danger);">×</button>
+                        </div>
+                    </div>
+                    <div class="sub-body">
+                        <textarea name="sub_urls[]" rows="3" placeholder="支持多行输入：HTTP/HTTPS 订阅链接、VLESS/VMess/Trojan/Hy2/TUIC/SS 等单节点 URI、或 Base64 文本...">{{ sub.url }}</textarea>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" class="sub-toggle-input" onchange="this.parentElement.nextElementSibling.value=this.checked?'1':'0'" {% if sub.enabled %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                                <input type="hidden" name="sub_enables[]" class="sub-enable-hidden" value="{{ '1' if sub.enabled else '0' }}">
+                                <span style="font-size: 0.88rem; font-weight: 500;">启用优选 IP 替换与下发</span>
+                            </div>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">自动识别节点类型并注入 CDN 优选 IP</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- 参数设置 Card -->
+        <div class="card" style="margin-top: 16px;">
+            <div class="card-header collapsible-header" onclick="toggleAdvancedConfig()">
+                <span class="card-title">⚙️ 参数设置与高级模板</span>
+                <span id="adv-arrow" style="font-size: 0.85rem; color: var(--text-sec);">▼ 点击展开/收起</span>
+            </div>
+            <div class="card-body" id="adv-content" style="display: block;">
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px;">
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自动同步间隔 (秒)</label>
+                        <input type="number" name="cfg_interval" value="{{ data.config.interval }}">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">异步并发线程数</label>
+                        <input type="number" name="cfg_threads" value="{{ data.config.threads }}">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">拉取超时时间 (秒)</label>
+                        <input type="number" name="cfg_timeout" value="{{ data.config.timeout }}">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自定义 User-Agent</label>
+                        <input type="text" name="cfg_ua" value="{{ data.config.ua }}">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">订阅鉴权 Token (URL中的 token=)</label>
+                        <input type="text" name="cfg_sub_token" value="{{ data.config.sub_token }}">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">修改管理员密码 (留空则保持现状)</label>
+                        <input type="password" name="cfg_web_password" placeholder="输入新密码以修改...">
+                    </div>
+                    <div style="grid-column: span 2;">
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自定义快捷分组标签 (支持逗号隔开)</label>
+                        <input type="text" name="cfg_custom_groups" value="{{ data.config.custom_groups }}" placeholder="例如: 游戏, 香港, 优化, VIP">
+                    </div>
+                </div>
+
+                <!-- Template Editors -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">Clash.Meta 配置模板</label>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="resetClashTpl()" style="padding:0 4px; font-size:0.75rem;">恢复默认</button>
+                        </div>
+                        <textarea name="clash_tpl" id="clash_tpl_area" rows="6" style="font-size:0.78rem;">{{ data.clash_tpl }}</textarea>
+                    </div>
+                    <div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">Sing-box 1.8+ 完整配置模板 (JSON)</label>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="resetSingboxTpl()" style="padding:0 4px; font-size:0.75rem;">恢复默认</button>
+                        </div>
+                        <textarea name="singbox_tpl" id="singbox_tpl_area" rows="6" style="font-size:0.78rem;">{{ data.singbox_tpl }}</textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sticky Floating Save Bar -->
+        <div class="fab-bar">
+            <span style="color: var(--text-sec); font-size: 0.88rem; display: flex; align-items: center; gap: 6px;">
+                <span>✨ 调整参数后请点击保存</span>
+            </span>
+            <button type="submit" class="btn btn-primary" style="padding: 10px 28px; border-radius: 40px; font-weight: 700;">💾 保存全部配置并同步</button>
+        </div>
+    </form>
+
+    <!-- 订阅与客户端导出 Card -->
+    {% if sub_url %}
+    <div class="card" style="margin-top: 10px;">
+        <div class="card-header">
+            <span class="card-title">📤 订阅分组与多客户端导出</span>
+            <span style="font-size: 0.8rem; color: var(--text-sec);">支持主流客户端一键导入</span>
+        </div>
+        <div class="card-body">
+            <!-- Filter Chips -->
+            <div style="margin-bottom: 8px; font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">⚡ 快捷筛选分类 (点击切换过滤)</div>
+            <div id="group-chips" class="group-chips">正在分析节点地区...</div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 18px;">
+                <input id="filterInput" placeholder="包含关键词 (Filter，如：HK|US)" onkeyup="updateLinks()">
+                <input id="excludeInput" placeholder="排除关键词 (Exclude，如：游戏|测试)" onkeyup="updateLinks()">
+            </div>
+
+            <!-- Export Cards Grid -->
+            <div class="export-grid">
+                <!-- Sing-box Card -->
+                <div class="export-card singbox">
+                    <div class="export-card-header">
+                        <div class="export-title" style="color: var(--success);">
+                            <span>📦 Sing-box 订阅</span>
+                            <span class="export-badge">已完美适配 1.8+ / 1.11+ 完整配置</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:0.78rem; color:var(--text-sec);">格式模式:</span>
+                            <select id="sb-format-select" onchange="updateLinks()" style="width:auto; padding:2px 8px; font-size:0.78rem;">
+                                <option value="full" selected>完整 Profile (包含策略组与分流)</option>
+                                <option value="outbounds">纯 Outbounds 节点列表</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="export-input-row">
+                        <input id="link-sb" class="export-input" readonly onclick="copy(this)">
+                    </div>
+                    <div class="export-btn-group">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="copy(document.getElementById('link-sb'))">📋 复制链接</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="qr(document.getElementById('link-sb').value)">📱 手机扫码</button>
+                        <a id="btn-import-sb" href="#" class="btn btn-success btn-sm">🚀 一键导入 Sing-box</a>
+                    </div>
+                </div>
+
+                <!-- Clash.Meta / Mihomo Card -->
+                <div class="export-card clash">
+                    <div class="export-card-header">
+                        <div class="export-title" style="color: var(--primary);">
+                            <span>⚡ Clash.Meta / Mihomo 订阅</span>
+                            <span class="export-badge">支持 Hy2 端口跳跃 / NaiveProxy</span>
+                        </div>
+                    </div>
+                    <div class="export-input-row">
+                        <input id="link-clash" class="export-input" readonly onclick="copy(this)">
+                    </div>
+                    <div class="export-btn-group">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="copy(document.getElementById('link-clash'))">📋 复制链接</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="qr(document.getElementById('link-clash').value)">📱 手机扫码</button>
+                        <a id="btn-import-clash" href="#" class="btn btn-primary btn-sm">🚀 一键导入 Clash / Verge</a>
+                    </div>
+                </div>
+
+                <!-- 通用 Base64 / Shadowrocket Card -->
+                <div class="export-card v2ray">
+                    <div class="export-card-header">
+                        <div class="export-title" style="color: var(--warning);">
+                            <span>🌐 通用 Base64 / Shadowrocket</span>
+                            <span class="export-badge">适用于小火箭 / v2rayN / 各类通用客户端</span>
+                        </div>
+                    </div>
+                    <div class="export-input-row">
+                        <input id="link-v2" class="export-input" readonly onclick="copy(this)">
+                    </div>
+                    <div class="export-btn-group">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="copy(document.getElementById('link-v2'))">📋 复制链接</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="qr(document.getElementById('link-v2').value)">📱 手机扫码</button>
+                        <a id="btn-import-sr" href="#" class="btn btn-ghost btn-sm" style="border-color: var(--warning); color: var(--warning);">🚀 一键导入 Shadowrocket</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 日志监控 Card -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">📜 实时运行日志</span>
+            <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="toggleLog()" id="logBtn">⏸️ 暂停刷新</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('liveLog').innerText=''">🧹 清屏</button>
+            </div>
+        </div>
+        <div id="liveLog" style="padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; height: 160px; overflow-y: auto; background: var(--bg); line-height: 1.6;">加载运行日志中...</div>
+    </div>
+</div>
+
+<!-- 二维码 Modal -->
+<div id="qrModal" class="modal" onclick="this.style.display='none'">
+    <div class="modal-content" style="max-width: 340px; text-align: center; padding: 24px;" onclick="event.stopPropagation()">
+        <h3 style="font-weight: 700; font-size: 1.1rem; margin-bottom: 16px;">手机扫码导入订阅</h3>
+        <div id="qrcode" style="display: flex; justify-content: center; padding: 12px; background: #ffffff; border-radius: 12px; margin: 0 auto; width: fit-content;"></div>
+        <p style="margin-top: 14px; font-size: 0.82rem; color: var(--text-sec);">打开客户端扫描上方二维码即可完成导入</p>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('qrModal').style.display='none'" style="margin-top: 16px; width: 100%;">关闭</button>
+    </div>
+</div>
+
+<!-- 节点管理与预览 Modal -->
+<div id="nodeModal" class="modal" onclick="this.style.display='none'">
+    <div class="modal-content" style="max-width: 760px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <div class="card-title">
+                <span>节点预览与管理</span>
+                <span class="export-badge" id="modal-node-badge">共 0 个节点</span>
+            </div>
+            <button type="button" class="btn-icon" onclick="document.getElementById('nodeModal').style.display='none'">×</button>
+        </div>
+        <div class="modal-body">
+            <!-- Filter Bar in Modal -->
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <input id="nodeModalSearch" placeholder="搜索节点名称、服务器或 IP..." onkeyup="renderFilteredNodes()" style="flex: 1;">
+            </div>
+            <div id="node-proto-chips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;"></div>
+            
+            <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: var(--radius-md);">
+                <table style="width: 100%; font-size: 0.84rem; border-collapse: collapse; text-align: left;">
+                    <thead>
+                        <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--card-border); color: var(--text-sec);">
+                            <th style="padding: 10px 14px;">节点名称</th>
+                            <th style="padding: 10px 14px; width: 90px;">协议</th>
+                            <th style="padding: 10px 14px; width: 100px; text-align: right;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nodeTableBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Pagination Bar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 0.82rem; color: var(--text-sec);">
+                <div id="pageInfo">第 1 / 1 页</div>
+                <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="changePage(-1)">上一页</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="changePage(1)">下一页</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('nodeModal').style.display='none'">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 测速 / CSV 导入 Modal -->
+<div id="speedTestModal" class="modal" onclick="this.style.display='none'">
+    <div class="modal-content" style="max-width: 600px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <div class="card-title">📋 测速结果 / CSV 智能解析导入</div>
+            <button type="button" class="btn-icon" onclick="document.getElementById('speedTestModal').style.display='none'">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size: 0.84rem; color: var(--text-sec); margin-bottom: 12px;">
+                支持直接粘贴 <strong>CloudflareSpeedTest</strong> 导出的 <code>result.csv</code>、控制台输出文本、或任意包含 IP 的列表。系统将自动过滤丢包率并提取优质 IP。
+            </p>
+            <textarea id="csvContentArea" rows="8" placeholder="在此粘贴 CSV 内容或测速文本，例如：&#10;IP 地址,已发送,已接收,丢包率,平均延迟,下载速度 (MB/s)...&#10;104.16.1.1,4,4,0.00%,120,35.2..."></textarea>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px;">
+                <div>
+                    <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 4px;">提取最优 IP 数量</label>
+                    <select id="csvLimitSelect">
+                        <option value="5">提取最优前 5 个</option>
+                        <option value="10" selected>提取最优前 10 个 (推荐)</option>
+                        <option value="20">提取最优前 20 个</option>
+                        <option value="0">全部提取</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 4px;">导入模式</label>
+                    <select id="csvModeSelect">
+                        <option value="append" selected>追加到现有 IP 库</option>
+                        <option value="overwrite">覆盖替换现有 IP 库</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('speedTestModal').style.display='none'">取消</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="submitSpeedTestImport()">⚡ 智能解析并导入</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    new Sortable(document.getElementById('sub-list'), { handle: '.sub-handle', animation: 150 });
+    const BASE_URL = "{{ sub_url }}";
+    const CUSTOM_GROUPS = "{{ data.config.custom_groups }}".split(/[,，]/).map(s=>s.trim()).filter(s=>s);
+    let cachedNodes = [];
+    let currentProtoFilter = 'ALL';
+    let currentPage = 1;
+    const pageSize = 25;
+
+    // Toast Notification
+    function showToast(msg, icon="✨") {
+        const t = document.getElementById('toast');
+        document.getElementById('toast-msg').innerText = msg;
+        document.getElementById('toast-icon').innerText = icon;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2200);
+    }
+
+    // Clipboard Copy
+    function copy(el) {
+        if (typeof el === 'string') {
+            navigator.clipboard.writeText(el).then(() => showToast("已复制到剪贴板！", "📋"));
+            return;
+        }
+        el.select();
+        navigator.clipboard.writeText(el.value).then(() => showToast("订阅链接已复制！", "📋"));
+    }
+
+    // QR Code
+    function qr(txt) {
+        if (!txt) return;
+        document.getElementById('qrcode').innerHTML = "";
+        new QRCode(document.getElementById('qrcode'), { text: txt, width: 200, height: 200 });
+        document.getElementById('qrModal').style.display = 'flex';
+    }
+
+    // Theme Switcher
+    function toggleTheme() {
+        const b = document.body;
+        const current = b.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        b.setAttribute('data-theme', current);
+        localStorage.setItem('theme', current);
+        showToast(current === 'light' ? '已切换至明亮主题' : '已切换至暗黑主题', '🌓');
+    }
+    if (localStorage.getItem('theme') === 'light') document.body.setAttribute('data-theme', 'light');
+
+    // Subscription Item Toggles
+    function toggleBody(header) {
+        const body = header.nextElementSibling;
+        body.classList.toggle('show');
+    }
+    function moveTop(btn) {
+        const item = btn.closest('.sub-item');
+        document.getElementById('sub-list').prepend(item);
+    }
+    function moveBottom(btn) {
+        const item = btn.closest('.sub-item');
+        document.getElementById('sub-list').append(item);
+    }
+    function removeSub(btn) {
+        if (confirm('确定要删除此订阅源配置吗？')) btn.closest('.sub-item').remove();
+    }
+    function batchToggle(enable) {
+        document.querySelectorAll('.sub-item').forEach(item => {
+            const cb = item.querySelector('.sub-toggle-input');
+            const hidden = item.querySelector('.sub-enable-hidden');
+            if (cb && hidden) {
+                cb.checked = enable;
+                hidden.value = enable ? '1' : '0';
+            }
+        });
+        showToast(enable ? "已全选启用" : "已全选停用", "⚡");
+    }
+
+    function addSub() {
+        const div = document.createElement('div');
+        div.className = 'sub-item';
+        div.innerHTML = `
+            <div class="sub-header" onclick="toggleBody(this)">
+                <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
+                <input name="sub_tags[]" class="sub-name-input" placeholder="新订阅源名称" onclick="event.stopPropagation()">
+                <div class="actions" onclick="event.stopPropagation()" style="display: flex; gap: 4px; align-items: center;">
+                    <button type="button" class="btn-icon" onclick="moveTop(this)">⬆️</button>
+                    <button type="button" class="btn-icon" onclick="moveBottom(this)">⬇️</button>
+                    <button type="button" class="btn-icon" onclick="toggleBody(this.closest('.sub-header'))">✏️</button>
+                    <button type="button" class="btn-icon" onclick="removeSub(this)" style="color: var(--danger);">×</button>
+                </div>
+            </div>
+            <div class="sub-body show">
+                <textarea name="sub_urls[]" rows="3" placeholder="支持多行：HTTP订阅链接、VLESS/TUIC/Hy2单节点链接、Base64文本..."></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" class="sub-toggle-input" onchange="this.parentElement.nextElementSibling.value=this.checked?'1':'0'" checked>
+                            <span class="slider"></span>
+                        </label>
+                        <input type="hidden" name="sub_enables[]" class="sub-enable-hidden" value="1">
+                        <span style="font-size: 0.88rem; font-weight: 500;">启用优选 IP 替换与下发</span>
+                    </div>
+                </div>
+            </div>`;
+        document.getElementById('sub-list').prepend(div);
+    }
+
+    function toggleAdvancedConfig() {
+        const c = document.getElementById('adv-content');
+        const arrow = document.getElementById('adv-arrow');
+        if (c.style.display === 'none') {
+            c.style.display = 'block';
+            arrow.innerText = '▼ 点击收起';
+        } else {
+            c.style.display = 'none';
+            arrow.innerText = '▶ 点击展开';
+        }
+    }
+
+    // IP Helpers
+    function clearIPs() {
+        if (confirm("确定清空优选 IP 列表吗？")) {
+            document.getElementById('ips_area').value = "";
+            showToast("IP 列表已清空");
+        }
+    }
+    function resetDefaultIPs() {
+        document.getElementById('ips_area').value = "104.16.1.1\n172.67.1.1";
+        showToast("已重置为官方默认优选 IP");
+    }
+    function dedupIPs() {
+        const area = document.getElementById('ips_area');
+        const lines = area.value.split('\n').map(s=>s.trim()).filter(s=>s);
+        const unique = [...new Set(lines)];
+        area.value = unique.join('\n');
+        showToast(`去重完成，当前保留 ${unique.length} 个独立条目`, "✨");
+    }
+
+    function updateIPs() {
+        const u = document.getElementById('api_url').value.trim();
+        if (!u) return showToast("请输入拉取 API 或优选域名", "⚠️");
+        showToast("正在拉取最新优选 IP...", "⏳");
+        fetch('/api/fetch_ips', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: u})
+        }).then(r => r.json()).then(d => {
+            if (d.status === 'success') {
+                document.getElementById('ips_area').value = d.ips;
+                showToast(`成功抓取并追加了 ${d.count} 个优选 IP！`, "✅");
+            } else {
+                showToast(d.msg || "抓取失败", "❌");
+            }
+        }).catch(e => showToast(e.message, "❌"));
+    }
+
+    // Speed Test Modal
+    function openSpeedTestModal() {
+        document.getElementById('speedTestModal').style.display = 'flex';
+    }
+    function submitSpeedTestImport() {
+        const text = document.getElementById('csvContentArea').value.trim();
+        if (!text) return showToast("请先粘贴测速 CSV 或文本", "⚠️");
+        const limit = parseInt(document.getElementById('csvLimitSelect').value);
+        const mode = document.getElementById('csvModeSelect').value;
+
+        fetch('/api/parse_csv_ips', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({content: text, limit: limit, mode: mode})
+        }).then(r => r.json()).then(d => {
+            if (d.status === 'success') {
+                document.getElementById('ips_area').value = d.ips;
+                document.getElementById('speedTestModal').style.display = 'none';
+                document.getElementById('csvContentArea').value = '';
+                showToast(`成功导入并更新了 ${d.count} 个优选 IP！`, "✅");
+            } else {
+                showToast(d.msg, "❌");
+            }
+        }).catch(e => showToast(e.message, "❌"));
+    }
+
+    // Trigger Single Sync
+    function syncSingle(idx) {
+        showToast("已提交单源刷新...", "⏳");
+        fetch('/api/sync_single', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({index: idx})
+        }).then(r => r.json()).then(d => {
+            showToast(d.msg || "已触发刷新", d.status === 'ok' ? '✅' : '❌');
+        });
+    }
+
+    function triggerSyncAll() {
+        showToast("已触发全量同步任务...", "⚡");
+        fetch('/api/sync_subs', {method: 'POST'}).then(r => r.json()).then(d => {
+            showToast(d.msg || "同步中", "✅");
+        });
+    }
+
+    // Subscriptions Generation
+    function initGroups() {
+        fetch('/api/nodes').then(r => r.json()).then(nodes => {
+            cachedNodes = nodes;
+            const container = document.getElementById('group-chips');
+            if (!container) return;
+            container.innerHTML = `<div class="chip active" onclick="selectGroup(this, '', '')">🌍 全部 <span class="chip-count">${nodes.length}</span></div>`;
+            
+            CUSTOM_GROUPS.forEach(g => {
+                const count = nodes.filter(n => {
+                    const txt = ((n.name || '') + " " + (n._tag || '')).toLowerCase();
+                    return txt.includes(g.toLowerCase());
+                }).length;
+                let style = count === 0 ? 'opacity:0.5' : '';
+                container.innerHTML += `<div class="chip" style="${style}" onclick="selectGroup(this, '${g}', '')">🏷️ ${g} <span class="chip-count">${count}</span></div>`;
+            });
+
+            const countryCounts = {};
+            nodes.forEach(n => {
+                if (CUSTOM_GROUPS.some(g => ((n.name || '') + " " + (n._tag || '')).toLowerCase().includes(g.toLowerCase()))) return;
+                const match = (n._clean_name || '').match(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/);
+                if (match) {
+                    let label = n._clean_name.split(' ')[0]; 
+                    countryCounts[label] = (countryCounts[label] || 0) + 1;
+                }
+            });
+
+            Object.keys(countryCounts).forEach(c => {
+                container.innerHTML += `<div class="chip" onclick="selectGroup(this, '${c}', '${CUSTOM_GROUPS.join('|')}')">${c} <span class="chip-count">${countryCounts[c]}</span></div>`;
+            });
+            updateLinks();
+        });
+    }
+
+    function selectGroup(el, filter, exclude) {
+        document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('filterInput').value = filter;
+        document.getElementById('excludeInput').value = exclude;
+        updateLinks();
+    }
+
+    function updateLinks() {
+        const filter = document.getElementById('filterInput') ? document.getElementById('filterInput').value.trim() : '';
+        const exclude = document.getElementById('excludeInput') ? document.getElementById('excludeInput').value.trim() : '';
+        const sbFormat = document.getElementById('sb-format-select') ? document.getElementById('sb-format-select').value : 'full';
+
+        let query = "";
+        if (filter) query += `&filter=${encodeURIComponent(filter)}`;
+        if (exclude) query += `&exclude=${encodeURIComponent(exclude)}`;
+        
+        const v2Url = BASE_URL + query;
+        const clashUrl = BASE_URL + "&flag=clash" + query;
+        const sbUrl = BASE_URL + `&flag=singbox&format=${sbFormat}` + query;
+
+        const elV2 = document.getElementById('link-v2');
+        const elClash = document.getElementById('link-clash');
+        const elSb = document.getElementById('link-sb');
+
+        if (elV2) elV2.value = v2Url;
+        if (elClash) elClash.value = clashUrl;
+        if (elSb) elSb.value = sbUrl;
+
+        // One-click Import Protocols
+        const btnClash = document.getElementById('btn-import-clash');
+        const btnSb = document.getElementById('btn-import-sb');
+        const btnSr = document.getElementById('btn-import-sr');
+
+        if (btnClash) btnClash.href = `clash://install-config?url=${encodeURIComponent(clashUrl)}`;
+        if (btnSb) btnSb.href = `sing-box://import-remote-profile?url=${encodeURIComponent(sbUrl)}`;
+        if (btnSr) btnSr.href = `sub://${btoa(v2Url)}`;
+    }
+
+    // Node Preview Modal & Pagination
+    function showNodePreview() {
+        document.getElementById('nodeModal').style.display = 'flex';
+        fetch('/api/nodes').then(r => r.json()).then(nodes => {
+            cachedNodes = nodes;
+            document.getElementById('modal-node-badge').innerText = `共 ${nodes.length} 个节点`;
+            renderProtoChips();
+            renderFilteredNodes();
+        });
+    }
+
+    function renderProtoChips() {
+        const container = document.getElementById('node-proto-chips');
+        const protos = ['ALL', ...new Set(cachedNodes.map(n => (n.type || 'other').toUpperCase()))];
+        container.innerHTML = protos.map(p => `
+            <div class="chip ${p === currentProtoFilter ? 'active' : ''}" style="padding: 3px 10px; font-size: 0.76rem;" onclick="filterByProto('${p}')">
+                ${p}
+            </div>
+        `).join('');
+    }
+
+    function filterByProto(proto) {
+        currentProtoFilter = proto;
+        currentPage = 1;
+        renderProtoChips();
+        renderFilteredNodes();
+    }
+
+    function renderFilteredNodes() {
+        const query = (document.getElementById('nodeModalSearch').value || '').toLowerCase();
+        let filtered = cachedNodes.filter(n => {
+            const matchesProto = (currentProtoFilter === 'ALL') || ((n.type || '').toUpperCase() === currentProtoFilter);
+            const matchesSearch = !query || ((n.name || '') + (n.server || '') + (n.type || '')).toLowerCase().includes(query);
+            return matchesProto && matchesSearch;
+        });
+
+        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        if (currentPage > totalPages) currentPage = totalPages;
+        document.getElementById('pageInfo').innerText = `第 ${currentPage} / ${totalPages} 页 (共 ${filtered.length} 条)`;
+
+        const start = (currentPage - 1) * pageSize;
+        const pageItems = filtered.slice(start, start + pageSize);
+
+        const tbody = document.getElementById('nodeTableBody');
+        tbody.innerHTML = '';
+        if (pageItems.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; padding: 24px; color: var(--text-muted);">暂无匹配节点</td></tr>`;
+            return;
+        }
+
+        pageItems.forEach((n, idx) => {
+            const realIndex = cachedNodes.indexOf(n);
+            const protoClass = `proto-${(n.type || 'other').toLowerCase()}`;
+            tbody.innerHTML += `
+                <tr style="border-bottom: 1px solid var(--card-border);">
+                    <td style="padding: 10px 14px;">
+                        <div style="font-weight: 600;">${escapeHtml(n.name || '未命名节点')}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; margin-top: 2px;">
+                            ${escapeHtml(n.server || '')}:${n.port || 443} ${n.ports ? `| 端口跳跃: ${n.ports}` : ''}
+                        </div>
+                    </td>
+                    <td style="padding: 10px 14px;">
+                        <span class="proto-badge ${protoClass}">${n.type || '未知'}</span>
+                    </td>
+                    <td style="padding: 10px 14px; text-align: right;">
+                        <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                            ${n.uri ? `<button type="button" class="btn btn-ghost btn-sm" onclick="copy('${escapeHtml(n.uri)}')">单链</button>` : ''}
+                            <button type="button" class="btn-icon" style="color: var(--danger);" onclick="delNode(${realIndex})">×</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        if (currentPage < 1) currentPage = 1;
+        renderFilteredNodes();
+    }
+
+    function delNode(i) {
+        if (!confirm('确定删除此节点吗？')) return;
+        fetch('/api/node_delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({index: i})
+        }).then(() => showNodePreview());
+    }
+
+    function escapeHtml(str) {
+        return (str || '').replace(/[&<>"']/g, function(m) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[m];
+        });
+    }
+
+    // Live Logs
+    let logPaused = false;
+    function fetchLog() {
+        if (logPaused) return;
+        fetch('/api/logs').then(r => r.text()).then(t => {
+            const el = document.getElementById('liveLog');
+            if (t.length !== el.innerText.length) {
+                el.innerText = t;
+                el.scrollTop = el.scrollHeight;
+            }
+        });
+    }
+    setInterval(fetchLog, 3000);
+    function toggleLog() {
+        logPaused = !logPaused;
+        document.getElementById('logBtn').innerText = logPaused ? '▶️ 继续刷新' : '⏸️ 暂停刷新';
+    }
+
+    // Status polling
+    setInterval(() => {
+        fetch('/api/status').then(r => r.json()).then(d => {
+            const ipEl = document.getElementById('ip-count-val');
+            const nodeEl = document.getElementById('node-count-val');
+            const timerEl = document.getElementById('timer');
+            const statusTxt = document.getElementById('sync-status-txt');
+            const dot = document.getElementById('sync-dot');
+
+            if (ipEl) ipEl.innerText = d.ip_count;
+            if (nodeEl) nodeEl.innerText = d.node_count;
+
+            if (d.is_syncing) {
+                if (timerEl) timerEl.innerText = "同步中...";
+                if (statusTxt) statusTxt.innerText = "正在同步订阅...";
+                if (dot) dot.style.background = "var(--primary)";
+            } else if (d.ttl <= 0) {
+                if (timerEl) timerEl.innerText = "等待触发";
+                if (statusTxt) statusTxt.innerText = "就绪空闲";
+                if (dot) dot.style.background = "var(--success)";
+            } else {
+                const h = Math.floor(d.ttl / 3600);
+                const m = Math.floor((d.ttl % 3600) / 60);
+                const s = d.ttl % 60;
+                if (timerEl) timerEl.innerText = `${h}时 ${m}分 ${s}秒`;
+                if (statusTxt) statusTxt.innerText = "自动同步就绪";
+                if (dot) dot.style.background = "var(--success)";
+            }
+        }).catch(() => {});
+    }, 1000);
+
+    function resetClashTpl() {
+        if (confirm("确定重置为默认 Clash 模板吗？")) {
+            document.getElementById('clash_tpl_area').value = "proxies:\n#PLACEHOLDER#";
+            showToast("已重置 Clash 模板");
+        }
+    }
+
+    function resetSingboxTpl() {
+        if (confirm("确定重置为默认 Sing-box 模板吗？")) {
+            document.getElementById('singbox_tpl_area').value = JSON.stringify({
+                "log": {"level": "info", "timestamp": true},
+                "dns": {
+                    "servers": [
+                        {"tag": "dns-remote", "address": "tls://1.1.1.1"},
+                        {"tag": "dns-direct", "address": "https://223.5.5.5/dns-query", "detour": "direct"},
+                        {"tag": "dns-block", "address": "rcode://success"}
+                    ],
+                    "rules": [
+                        {"outbound": "any", "server": "dns-direct"},
+                        {"clash_mode": "Global", "server": "dns-remote"},
+                        {"clash_mode": "Direct", "server": "dns-direct"},
+                        {"rule_set": "geosite-cn", "server": "dns-direct"}
+                    ],
+                    "strategy": "prefer_ipv4"
+                },
+                "inbounds": [
+                    {
+                        "type": "tun",
+                        "tag": "tun-in",
+                        "interface_name": "tun0",
+                        "inet4_address": "172.19.0.1/30",
+                        "auto_route": true,
+                        "strict_route": true,
+                        "stack": "system",
+                        "sniff": true
+                    },
+                    {
+                        "type": "mixed",
+                        "tag": "mixed-in",
+                        "listen": "127.0.0.1",
+                        "listen_port": 2080,
+                        "sniff": true
+                    }
+                ],
+                "outbounds": "#PLACEHOLDER#",
+                "route": {
+                    "auto_detect_interface": true,
+                    "final": "🚀 节点选择",
+                    "rules": [
+                        {"type": "logical", "mode": "or", "rules": [{"port": 53}, {"protocol": "dns"}], "outbound": "dns-out"},
+                        {"clash_mode": "Direct", "outbound": "🎯 全球直连"},
+                        {"clash_mode": "Global", "outbound": "🚀 节点选择"},
+                        {"rule_set": "geosite-geolocation-!cn", "outbound": "🚀 节点选择"},
+                        {"rule_set": ["geoip-cn", "geosite-cn"], "outbound": "🎯 全球直连"}
+                    ],
+                    "rule_set": [
+                        {
+                            "type": "remote",
+                            "tag": "geosite-geolocation-!cn",
+                            "format": "binary",
+                            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+                            "download_detour": "🎯 全球直连"
+                        },
+                        {
+                            "type": "remote",
+                            "tag": "geosite-cn",
+                            "format": "binary",
+                            "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+                            "download_detour": "🎯 全球直连"
+                        },
+                        {
+                            "type": "remote",
+                            "tag": "geoip-cn",
+                            "format": "binary",
+                            "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+                            "download_detour": "🎯 全球直连"
+                        }
+                    ]
+                }
+            }, null, 2);
+            showToast("已重置 Sing-box 模板");
+        }
+    }
+
+    if (new URLSearchParams(window.location.search).get('status') === 'saved') {
+        showToast("配置已成功保存并触发后台同步！", "✅");
+        history.replaceState(null, '', location.pathname);
+    }
+    
+    initGroups();
+</script>
+{% endif %}
+</body>
+</html>

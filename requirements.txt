@@ -1,0 +1,7 @@
+Flask>=2.3,<4
+Werkzeug>=2.3,<4
+requests>=2.31
+aiohttp>=3.9
+PyYAML>=6.0
+geoip2>=4.8
+gunicorn>=21.2
