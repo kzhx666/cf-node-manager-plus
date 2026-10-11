@@ -2247,131 +2247,137 @@ def api_parse_csv_ips():
 
 @app.route('/api/push_nodes', methods=['POST'])
 def api_push_nodes():
-    if not is_authenticated():
-        return jsonify({"status": "error", "msg": "未授权访问，请提供正确的 Token 或密码"}), 401
-    
-    data_payload = request.get_json(silent=True) if request.is_json else (request.form or {})
-    if not data_payload:
-        data_payload = {}
-    
-    replace = data_payload.get('replace', True)
-    if isinstance(replace, str):
-        replace = replace.lower() not in ('false', '0', 'no')
-    trigger_sync = data_payload.get('sync', True)
-    if isinstance(trigger_sync, str):
-        trigger_sync = trigger_sync.lower() not in ('false', '0', 'no')
+    try:
+        if not is_authenticated():
+            return jsonify({"status": "error", "msg": "未授权访问，请提供正确的 Token 或密码"}), 401
+        
+        data_payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+        if not data_payload:
+            data_payload = {}
+        
+        replace = data_payload.get('replace', True)
+        if isinstance(replace, str):
+            replace = replace.lower() not in ('false', '0', 'no')
+        trigger_sync = data_payload.get('sync', True)
+        if isinstance(trigger_sync, str):
+            trigger_sync = trigger_sync.lower() not in ('false', '0', 'no')
 
-    # 支持单源推送或多源批量推送 (sources: [...])
-    sources_input = data_payload.get('sources')
-    if not isinstance(sources_input, list) or not sources_input:
-        single_tag = str(data_payload.get('tag', '')).strip()
-        single_nodes = data_payload.get('nodes', '')
-        if single_tag and single_nodes:
-            sources_input = [{
-                "tag": single_tag,
-                "nodes": single_nodes,
-                "enabled": data_payload.get('enabled')
-            }]
-        else:
-            sources_input = []
-
-    if not sources_input:
-        return jsonify({"status": "error", "msg": "缺少必要参数: tag/nodes 或 sources 列表"}), 400
-
-    d = load_data()
-    subs = d.get('remote_subs', [])
-    processed_tags = []
-    items_to_insert = []
-    
-    for s_item in sources_input:
-        tag = str(s_item.get('tag', '')).strip()
-        raw_nodes = s_item.get('nodes', '')
-        if not tag or not raw_nodes:
-            continue
-            
-        if isinstance(raw_nodes, list):
-            nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
-            nodes_str = "\n".join(nodes_list)
-        else:
-            nodes_str = str(raw_nodes).strip()
-            nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
-        if not nodes_str:
-            continue
-
-        # 优选开关解析：优先显式传参；若未传，则根据节点/tag智能判断：argo 默认 True (开启优选)，非 argo 默认 False (关闭优选)
-        item_enabled = s_item.get('enabled')
-        if item_enabled is not None:
-            if isinstance(item_enabled, str):
-                item_enabled = item_enabled.lower() in ('1', 'true', 'yes')
+        # 支持单源推送或多源批量推送 (sources: [...])
+        sources_input = data_payload.get('sources')
+        if not isinstance(sources_input, list) or not sources_input:
+            single_tag = str(data_payload.get('tag', '')).strip()
+            single_nodes = data_payload.get('nodes', '')
+            if single_tag and single_nodes:
+                sources_input = [{
+                    "tag": single_tag,
+                    "nodes": single_nodes,
+                    "enabled": data_payload.get('enabled')
+                }]
             else:
-                item_enabled = bool(item_enabled)
-        else:
-            is_argo = ('argo' in tag.lower()) or ('argo' in nodes_str.lower())
-            item_enabled = is_argo
+                sources_input = []
 
-        # 检查是否已存在同名订阅源
-        found_idx = -1
-        for idx, s in enumerate(subs):
-            if s.get('tag', '').strip() == tag:
-                found_idx = idx
-                break
+        if not sources_input:
+            return jsonify({"status": "error", "msg": "缺少必要参数: tag/nodes 或 sources 列表"}), 400
+
+        d = load_data()
+        subs = d.get('remote_subs', [])
+        processed_tags = []
+        items_to_insert = []
+        
+        for s_item in sources_input:
+            tag = str(s_item.get('tag', '')).strip()
+            raw_nodes = s_item.get('nodes', '')
+            if not tag or not raw_nodes:
+                continue
                 
-        if found_idx >= 0:
-            existing_sub = subs.pop(found_idx)
-            if replace:
-                existing_sub['url'] = nodes_str
+            if isinstance(raw_nodes, list):
+                nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
+                nodes_str = "\n".join(nodes_list)
             else:
-                old_url = existing_sub.get('url', '').strip()
-                existing_sub['url'] = f"{old_url}\n{nodes_str}".strip()
-            existing_sub['enabled'] = item_enabled
-            items_to_insert.append(existing_sub)
-        else:
-            new_sub = {
-                "url": nodes_str,
-                "tag": tag,
-                "enabled": item_enabled,
-                "quota_gb": 0,
-                "probe_id": "",
-                "nezha_id": "",
-                "info": None
-            }
-            # 如果是 Argo 独立订阅，自动尝试继承同 VPS 主订阅已有的探针与配额
-            if is_argo:
-                base_tag = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
-                for s in (items_to_insert + subs):
-                    if s.get('tag', '').strip() == base_tag or s.get('tag', '').strip().lower() == base_tag.lower():
-                        if s.get('probe_id'):
-                            new_sub['probe_id'] = s.get('probe_id')
-                            new_sub['nezha_id'] = s.get('probe_id')
-                        if s.get('quota_gb'):
-                            new_sub['quota_gb'] = s.get('quota_gb')
-                        if s.get('info') and isinstance(s.get('info'), dict) and s.get('info').get('used') != 'VPS':
-                            new_sub['info'] = copy.deepcopy(s.get('info'))
-                        break
-            items_to_insert.append(new_sub)
-            
-        processed_tags.append(tag)
+                nodes_str = str(raw_nodes).strip()
+                nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
+            if not nodes_str:
+                continue
 
-    if not processed_tags:
-        return jsonify({"status": "error", "msg": "未提供有效的节点内容或订阅源名称"}), 400
+            # 🌟 始终计算是否为 Argo 节点
+            is_argo = ('argo' in tag.lower()) or ('argo' in nodes_str.lower())
 
-    # 按照正向顺序置顶到 subs 最前面 (管理页面最上面)
-    for item in reversed(items_to_insert):
-        subs.insert(0, item)
+            # 优选开关解析：优先显式传参；若未传，则根据节点/tag智能判断：argo 默认 True (开启优选)，非 argo 默认 False (关闭优选)
+            item_enabled = s_item.get('enabled')
+            if item_enabled is not None:
+                if isinstance(item_enabled, str):
+                    item_enabled = item_enabled.lower() in ('1', 'true', 'yes')
+                else:
+                    item_enabled = bool(item_enabled)
+            else:
+                item_enabled = is_argo
 
-    d['remote_subs'] = subs
-    save_data(d)
-    write_log(f"API Push: 成功推送并置顶订阅源: {', '.join(processed_tags)}")
+            # 检查是否已存在同名订阅源
+            found_idx = -1
+            for idx, s in enumerate(subs):
+                if s.get('tag', '').strip() == tag:
+                    found_idx = idx
+                    break
+                    
+            if found_idx >= 0:
+                existing_sub = subs.pop(found_idx)
+                if replace:
+                    existing_sub['url'] = nodes_str
+                else:
+                    old_url = existing_sub.get('url', '').strip()
+                    existing_sub['url'] = f"{old_url}\n{nodes_str}".strip()
+                existing_sub['enabled'] = item_enabled
+                items_to_insert.append(existing_sub)
+            else:
+                new_sub = {
+                    "url": nodes_str,
+                    "tag": tag,
+                    "enabled": item_enabled,
+                    "quota_gb": 0,
+                    "probe_id": "",
+                    "nezha_id": "",
+                    "info": None
+                }
+                # 如果是 Argo 独立订阅，自动尝试继承同 VPS 主订阅已有的探针与配额
+                if is_argo:
+                    base_tag = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
+                    for s in (items_to_insert + subs):
+                        if s.get('tag', '').strip() == base_tag or s.get('tag', '').strip().lower() == base_tag.lower():
+                            if s.get('probe_id'):
+                                new_sub['probe_id'] = s.get('probe_id')
+                                new_sub['nezha_id'] = s.get('probe_id')
+                            if s.get('quota_gb'):
+                                new_sub['quota_gb'] = s.get('quota_gb')
+                            if s.get('info') and isinstance(s.get('info'), dict) and s.get('info').get('used') != 'VPS':
+                                new_sub['info'] = copy.deepcopy(s.get('info'))
+                            break
+                items_to_insert.append(new_sub)
+                
+            processed_tags.append(tag)
 
-    if trigger_sync:
-        threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
+        if not processed_tags:
+            return jsonify({"status": "error", "msg": "未提供有效的节点内容或订阅源名称"}), 400
 
-    return jsonify({
-        "status": "success",
-        "msg": f"成功推送并置顶订阅源【{', '.join(processed_tags)}】",
-        "tags": processed_tags,
-        "count": len(processed_tags)
-    })
+        # 按照正向顺序置顶到 subs 最前面 (管理页面最上面)
+        for item in reversed(items_to_insert):
+            subs.insert(0, item)
+
+        d['remote_subs'] = subs
+        save_data(d)
+        write_log(f"API Push: 成功推送并置顶订阅源: {', '.join(processed_tags)}")
+
+        if trigger_sync:
+            threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
+
+        return jsonify({
+            "status": "success",
+            "msg": f"成功推送并置顶订阅源【{', '.join(processed_tags)}】",
+            "tags": processed_tags,
+            "count": len(processed_tags)
+        })
+    except Exception as e:
+        write_log(f"API Push Fatal Error: {e}")
+        return jsonify({"status": "error", "msg": f"推送异常: {str(e)}"}), 500
 
 @app.route('/api/sync_subs', methods=['POST'])
 def api_sync_subs():
