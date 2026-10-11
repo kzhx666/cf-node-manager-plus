@@ -1012,7 +1012,8 @@ def parse_uri(uri):
                 'tls': q.get('security', [''])[0] in ['tls', 'reality'],
                 'reality': q.get('security', [''])[0] == 'reality',
                 'flow': q.get('flow', [''])[0],
-                'sni': q.get('sni', [''])[0],
+                'sni': q.get('sni', [''])[0] or q.get('host', [''])[0],
+                'headerType': q.get('headerType', ['none'])[0],
             })
             if b['reality']:
                 b.update({
@@ -1406,14 +1407,26 @@ def gen_uri(n, ip=None, port=None, name=None):
     if not isinstance(n, dict) or 'type' not in n: return None
     server = ip or n['server']; port = str(port or n['port']); remark = urllib.parse.quote(name or n['name'])
     if n['type'] == 'vless':
-        p = {'type':n['network'], 'security':'tls' if n['tls'] else 'none'}
-        if n.get('reality'): p.update({'security':'reality', 'pbk':n['pbk'], 'sid':n['sid'], 'fp':n.get('fp','chrome')})
-        elif n.get('sni'): p['sni'] = n['sni']
-        if n.get('flow'): p['flow'] = n['flow']
-        if n.get('fp'): p['fp'] = n['fp']
-        if n.get('skip-cert-verify'): p['insecure'] = '1'; p['allowInsecure'] = '1'
-        if n['network']=='ws': p.update({'path':n.get('ws-path','/'), 'host':n.get('ws-host','')})
-        elif n['network']=='grpc': p['serviceName'] = n.get('grpc-name','')
+        sec = 'reality' if n.get('reality') else ('tls' if n.get('tls') else 'none')
+        p = {'type': n.get('network', 'tcp'), 'security': sec, 'encryption': n.get('encryption', 'none')}
+        if n.get('reality'):
+            p.update({'pbk': n.get('pbk', ''), 'sid': n.get('sid', ''), 'fp': n.get('fp', 'chrome')})
+        if n.get('sni'):
+            p['sni'] = n['sni']
+        if n.get('flow'):
+            p['flow'] = n['flow']
+        if n.get('fp'):
+            p['fp'] = n['fp']
+        if n.get('headerType'):
+            p['headerType'] = n['headerType']
+        elif n.get('network', 'tcp') == 'tcp':
+            p['headerType'] = 'none'
+        if n.get('skip-cert-verify'):
+            p['insecure'] = '1'; p['allowInsecure'] = '1'
+        if n.get('network') == 'ws':
+            p.update({'path': n.get('ws-path', '/'), 'host': n.get('ws-host', '')})
+        elif n.get('network') == 'grpc':
+            p['serviceName'] = n.get('grpc-name', '')
         return f"vless://{n['uuid']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'vmess':
         j = {"v":"2", "ps":name or n['name'], "add":server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
