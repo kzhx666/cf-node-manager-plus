@@ -708,7 +708,8 @@
             <div class="version-badge">v43.00</div>
         </div>
         <div class="nav-actions">
-            <button class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="切换明暗主题">🌓 主题</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openBackupModal()" title="系统配置备份与还原">💾 备份还原</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="切换明暗主题">🌓 主题</button>
             <a href="/logout" class="btn btn-ghost btn-sm" title="退出管理" style="color: var(--danger);">退出</a>
         </div>
     </div>
@@ -900,6 +901,24 @@
                             <button type="button" class="btn btn-ghost btn-sm" onclick="resetSingboxTpl()" style="padding:0 4px; font-size:0.75rem;">恢复默认</button>
                         </div>
                         <textarea name="singbox_tpl" id="singbox_tpl_area" rows="6" style="font-size:0.78rem;">{{ data.singbox_tpl }}</textarea>
+                    </div>
+                <!-- Backup and Restore Quick Panel -->
+                <div style="background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--card-border); border-radius: var(--radius-md); padding: 14px 18px; margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div>
+                            <div style="font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 6px;">
+                                <span>💾 数据备份与配置还原</span>
+                                <span class="export-badge" style="background: rgba(16, 185, 129, 0.15); color: var(--success);">数据安全</span>
+                            </div>
+                            <div style="font-size: 0.78rem; color: var(--text-sec); margin-top: 3px;">
+                                随时备份当前全部节点、优选 IP 库、分流规则模板及系统设置，支持随时下载或上传还原。
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="downloadBackup('zip')">📦 下载 ZIP 备份</button>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="downloadBackup('json')">📄 导出 JSON</button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="openBackupModal()">📤 还原 / 上传备份</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1101,6 +1120,73 @@
         <div class="modal-footer">
             <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('speedTestModal').style.display='none'">取消</button>
             <button type="button" class="btn btn-primary btn-sm" onclick="submitSpeedTestImport()">⚡ 智能解析并导入</button>
+        </div>
+    </div>
+</div>
+
+<!-- 备份与还原 Modal -->
+<div id="backupModal" class="modal" onclick="this.style.display='none'">
+    <div class="modal-content" style="max-width: 620px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <div class="card-title">
+                <span>💾 系统配置备份与还原</span>
+            </div>
+            <button type="button" class="btn-icon" onclick="document.getElementById('backupModal').style.display='none'">×</button>
+        </div>
+        <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 20px;">
+            <!-- 1. 下载备份区块 -->
+            <div style="background: var(--bg); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 16px;">
+                <h4 style="font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                    <span>📥 下载当前配置备份</span>
+                </h4>
+                <p style="font-size: 0.8rem; color: var(--text-sec); margin-bottom: 12px; line-height: 1.5;">
+                    备份将导出完整的 <code>data.json</code> 配置，涵盖所有订阅节点、优选 IP 库、自定义分组、测速 API 地址及 Clash / Sing-box 分流模板。
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a href="/api/snapshot_dl" class="btn btn-primary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                        <span>📦 下载备份包 (ZIP 格式)</span>
+                    </a>
+                    <a href="/api/export_json" class="btn btn-ghost btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                        <span>📄 导出配置文件 (JSON 格式)</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 2. 还原备份区块 -->
+            <div style="background: var(--bg); border: 1px solid var(--card-border); border-radius: var(--radius-md); padding: 16px;">
+                <h4 style="font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                    <span>📤 从备份文件还原配置</span>
+                </h4>
+                <p style="font-size: 0.8rem; color: var(--text-sec); margin-bottom: 12px; line-height: 1.5;">
+                    支持上传 <code>.zip</code> 备份包或 <code>.json</code> 数据文件。还原后将立即生效并刷新页面。
+                </p>
+                
+                <!-- 拖拽/点击上传区域 -->
+                <div id="dropZone" onclick="document.getElementById('restoreFileInput').click()" style="border: 2px dashed var(--card-border); border-radius: var(--radius-md); padding: 24px 16px; text-align: center; cursor: pointer; transition: all 0.2s; background: rgba(255,255,255,0.01);">
+                    <input type="file" id="restoreFileInput" accept=".zip,.json" style="display: none;" onchange="handleRestoreFileSelected(this)">
+                    <div style="font-size: 1.8rem; margin-bottom: 6px;">📁</div>
+                    <div id="dropZoneText" style="font-size: 0.86rem; font-weight: 600; color: var(--text);">点击选择或拖拽备份文件至此处</div>
+                    <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">支持 .zip 压缩包或 .json 数据文件</div>
+                </div>
+
+                <div id="selectedFileInfo" style="display: none; margin-top: 12px; padding: 10px 14px; background: rgba(99, 102, 241, 0.1); border-radius: var(--radius-sm); font-size: 0.82rem; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>📄</span>
+                        <span id="selectedFileName" style="font-weight: 600;">--</span>
+                        <span id="selectedFileSize" style="color: var(--text-sec); font-size: 0.76rem;">--</span>
+                    </div>
+                    <button type="button" class="btn-icon" onclick="clearSelectedFile(event)" title="取消选择" style="color: var(--danger);">×</button>
+                </div>
+
+                <div style="margin-top: 14px; display: flex; justify-content: flex-end;">
+                    <button type="button" id="btnDoRestore" class="btn btn-success btn-sm" onclick="uploadAndRestore()" disabled style="opacity: 0.6; cursor: not-allowed;">
+                        ⚡ 开始还原配置
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('backupModal').style.display='none'">关闭</button>
         </div>
     </div>
 </div>
@@ -1360,6 +1446,135 @@
             }
         }).catch(e => showToast(e.message, "❌"));
     }
+
+    // Backup & Restore Handlers
+    function openBackupModal() {
+        document.getElementById('backupModal').style.display = 'flex';
+        clearSelectedFile();
+    }
+
+    function downloadBackup(format) {
+        if (format === 'json') {
+            window.location.href = '/api/export_json';
+        } else {
+            window.location.href = '/api/snapshot_dl';
+        }
+    }
+
+    let currentRestoreFile = null;
+
+    function handleRestoreFileSelected(input) {
+        if (input.files && input.files[0]) {
+            setRestoreFile(input.files[0]);
+        }
+    }
+
+    function setRestoreFile(file) {
+        currentRestoreFile = file;
+        const nameEl = document.getElementById('selectedFileName');
+        const sizeEl = document.getElementById('selectedFileSize');
+        const infoEl = document.getElementById('selectedFileInfo');
+        const btnEl = document.getElementById('btnDoRestore');
+        
+        nameEl.innerText = file.name;
+        const kb = (file.size / 1024).toFixed(1);
+        sizeEl.innerText = `(${kb} KB)`;
+        infoEl.style.display = 'flex';
+        
+        btnEl.disabled = false;
+        btnEl.style.opacity = '1';
+        btnEl.style.cursor = 'pointer';
+        btnEl.innerText = '⚡ 开始还原配置';
+    }
+
+    function clearSelectedFile(e) {
+        if (e) e.stopPropagation();
+        currentRestoreFile = null;
+        const input = document.getElementById('restoreFileInput');
+        if (input) input.value = '';
+        const info = document.getElementById('selectedFileInfo');
+        if (info) info.style.display = 'none';
+        const btnEl = document.getElementById('btnDoRestore');
+        if (btnEl) {
+            btnEl.disabled = true;
+            btnEl.style.opacity = '0.6';
+            btnEl.style.cursor = 'not-allowed';
+            btnEl.innerText = '⚡ 开始还原配置';
+        }
+    }
+
+    function uploadAndRestore() {
+        if (!currentRestoreFile) {
+            alert('请先选择或拖拽要还原的备份文件（.zip 或 .json）！');
+            return;
+        }
+
+        if (!confirm('确定要从此备份还原配置吗？\n该操作将覆盖当前系统配置并立即生效！')) {
+            return;
+        }
+
+        const btnEl = document.getElementById('btnDoRestore');
+        btnEl.disabled = true;
+        btnEl.innerText = '⏳ 正在还原中...';
+
+        const formData = new FormData();
+        formData.append('file', currentRestoreFile);
+
+        fetch('/api/snapshot_restore', {
+            method: 'POST',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                showToast(data.msg || '配置还原成功！', '🎉');
+                btnEl.innerText = '✅ 还原成功，正在刷新...';
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1200);
+            } else {
+                alert('还原失败: ' + (data.msg || '未知错误'));
+                btnEl.disabled = false;
+                btnEl.innerText = '⚡ 开始还原配置';
+            }
+        })
+        .catch(err => {
+            alert('上传还原异常: ' + err.message);
+            btnEl.disabled = false;
+            btnEl.innerText = '⚡ 开始还原配置';
+        });
+    }
+
+    // Drag and drop initialization for backup modal
+    window.addEventListener('DOMContentLoaded', function() {
+        const dropZone = document.getElementById('dropZone');
+        if (dropZone) {
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.style.borderColor = 'var(--primary)';
+                    dropZone.style.background = 'rgba(99, 102, 241, 0.08)';
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.style.borderColor = 'var(--card-border)';
+                    dropZone.style.background = 'rgba(255, 255, 255, 0.01)';
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                if (dt && dt.files && dt.files.length) {
+                    setRestoreFile(dt.files[0]);
+                }
+            }, false);
+        }
+    });
 
     // Trigger Single Sync
     function syncSingle(idx) {

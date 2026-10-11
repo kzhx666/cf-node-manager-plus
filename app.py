@@ -395,8 +395,9 @@ async def fetch_single_url(session, url, timeout):
             if r.status == 200:
                 text = await r.text()
                 info = parse_traffic_info(r.headers.get('Subscription-Userinfo', ''))
-                return text, info
+                return text or "", info
     except: pass
+    return "", None
 def clash_to_internal(p):
     if not isinstance(p, dict):
         return None
@@ -483,7 +484,7 @@ def decode_sub_content(content):
         return parse_uri_list([content])
     try:
         if yaml and ("proxies:" in content or "Proxy:" in content):
-            try: return [clash_to_internal(p) for p in (yaml.safe_load(content).get('proxies') or [])]
+            try: return [n for n in (clash_to_internal(p) for p in (yaml.safe_load(content).get('proxies') or [])) if n]
             except: pass
         try: return parse_uri_list(base64.b64decode(content + '='*(-len(content)%4)).decode('utf-8', 'ignore').splitlines())
         except: return parse_uri_list(content.splitlines())
@@ -1228,7 +1229,12 @@ async def async_process_subs():
 
                 async def fetch_job(url):
                     async with sem:
-                        return await fetch_single_url(session, url, int(cfg.get('timeout', 20)))
+                        try:
+                            res = await fetch_single_url(session, url, int(cfg.get('timeout', 20)))
+                            if isinstance(res, tuple) and len(res) == 2:
+                                return res
+                        except: pass
+                        return "", None
                 
                 if http_links:
                     fetch_results = await asyncio.gather(*[fetch_job(u) for u in http_links], return_exceptions=True)
@@ -1242,7 +1248,8 @@ async def async_process_subs():
                     combined_content = "\n".join(raw_content_parts)
                     decoded_nodes = decode_sub_content(combined_content)
                     for n in decoded_nodes:
-                        n['_tag'] = tag; n['_opt'] = enabled; direct_nodes.append(n)
+                        if isinstance(n, dict):
+                            n['_tag'] = tag; n['_opt'] = enabled; direct_nodes.append(n)
                 
                 return direct_nodes
 
@@ -1255,6 +1262,7 @@ async def async_process_subs():
                 
                 unique = {}; valid_nodes = []
                 for n in all_nodes:
+                    if not isinstance(n, dict): continue
                     ports_fp = ''
                     if n.get('ports'): ports_fp = str(n.get('ports'))
                     elif n.get('server_ports'): ports_fp = ','.join([str(x) for x in n.get('server_ports')])
@@ -1521,23 +1529,58 @@ def snapshot_dl():
     with zipfile.ZipFile(mem, 'w', zipfile.ZIP_DEFLATED) as zf:
         if os.path.exists(DATA_FILE): zf.write(DATA_FILE, 'data.json')
     mem.seek(0)
-    return send_file(mem, as_attachment=True, download_name=f"backup_{int(time.time())}.zip")
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(mem, as_attachment=True, download_name=f"cf_backup_{ts}.zip", mimetype='application/zip')
+
+@app.route('/api/export_json')
+def export_json():
+    d = load_data()
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    resp = make_response(json.dumps(d, indent=2, ensure_ascii=False))
+    resp.headers['Content-Type'] = 'application/json; charset=utf-8'
+    resp.headers['Content-Disposition'] = f"attachment; filename=cf_backup_{ts}.json"
+    return resp
 
 @app.route('/api/snapshot_restore', methods=['POST'])
 def snapshot_restore():
     f = request.files.get('file')
-    if not f: return "No file uploaded", 400
+    if not f or not f.filename:
+        return jsonify({"status": "error", "msg": "未选择上传的备份文件"}), 400
     try:
-        with zipfile.ZipFile(f) as zf:
-            for member in zf.infolist():
-                # Prevent Zip Slip directory traversal
-                target_path = os.path.abspath(os.path.join(DATA_DIR, member.filename))
-                if not target_path.startswith(os.path.abspath(DATA_DIR)):
-                    return "Illegal path inside zip", 400
-                zf.extract(member, DATA_DIR)
-        return "OK"
+        filename = f.filename.lower()
+        if filename.endswith('.json'):
+            raw_content = f.read().decode('utf-8', errors='ignore')
+            data_obj = json.loads(raw_content)
+            if not isinstance(data_obj, dict):
+                return jsonify({"status": "error", "msg": "无效的 JSON 配置文件内容"}), 400
+            save_data(data_obj)
+            save_cache()
+            write_log("Config restored successfully from uploaded JSON file")
+            return jsonify({"status": "ok", "msg": "配置已成功从 JSON 备份文件还原！"})
+        elif filename.endswith('.zip'):
+            with zipfile.ZipFile(f) as zf:
+                for member in zf.infolist():
+                    target_path = os.path.abspath(os.path.join(DATA_DIR, member.filename))
+                    if not target_path.startswith(os.path.abspath(DATA_DIR)):
+                        return jsonify({"status": "error", "msg": "压缩包包含非法路径"}), 400
+                    zf.extract(member, DATA_DIR)
+            save_cache()
+            write_log("Config restored successfully from uploaded ZIP backup")
+            return jsonify({"status": "ok", "msg": "配置已成功从 ZIP 压缩包还原！"})
+        else:
+            file_bytes = f.read()
+            try:
+                data_obj = json.loads(file_bytes.decode('utf-8', errors='ignore'))
+                if isinstance(data_obj, dict):
+                    save_data(data_obj)
+                    save_cache()
+                    write_log("Config restored successfully from file content")
+                    return jsonify({"status": "ok", "msg": "配置已成功还原！"})
+            except: pass
+            return jsonify({"status": "error", "msg": "仅支持上传 .zip 压缩包或 .json 数据文件"}), 400
     except Exception as e:
-        return str(e), 500
+        write_log(f"Restore failed: {e}")
+        return jsonify({"status": "error", "msg": f"还原失败: {e}"}), 500
 
 @app.route('/sub')
 def sub():
