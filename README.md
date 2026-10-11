@@ -28,11 +28,12 @@
 
 ## 快速开始（Docker Compose）
 
-### 1）拉取代码
+### 1）拉取代码（默认安装到 /opt 目录）
 
 ```bash
+mkdir -p /opt && cd /opt
 git clone https://github.com/kzhx666/cf-node-manager-plus.git
-cd cf-node-manager-plus
+cd /opt/cf-node-manager-plus
 ```
 
 ### 2）配置环境变量
@@ -133,6 +134,7 @@ docker compose ps
 ## 更新 / 升级
 
 ```bash
+cd /opt/cf-node-manager-plus
 git pull
 docker compose up -d --build
 docker compose ps
