@@ -850,7 +850,7 @@
                             </span>
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 0.75rem; color: var(--text-muted);">总配额 (GB):</span>
-                                <input type="number" step="any" name="sub_quotas[]" value="{{ sub.quota_gb if sub.quota_gb else '' }}" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
+                                <input type="number" step="any" name="sub_quotas[]" value="{{ sub.quota_gb if sub.quota_gb else '' }}" placeholder="留空自动匹配探针 (或填GB)" style="width: 150px; padding: 3px 8px; font-size: 0.78rem;">
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
@@ -862,7 +862,7 @@
                                 {% endif %}
                             </div>
                             <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                                * 留空将按分组名/节点名自动容错匹配；匹配不上时可在此选择或手动填写
+                                * 留空将自动容错匹配探针节点及总流量配额；亦可在此手动指定或修改
                             </span>
                         </div>
 
@@ -1449,7 +1449,11 @@
         }
         if (best && bestScore >= 0.70) {
             probeInput.value = best.name;
-            showToast(`智能匹配到探针: ${best.name}`, '🎯');
+            const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+            if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
+                quotaInput.value = best.limit_gb;
+            }
+            showToast(`智能匹配探针: ${best.name}${best.limit_gb ? ' (配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
         }
     }
 
@@ -1476,14 +1480,14 @@
                     </span>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="font-size: 0.75rem; color: var(--text-muted);">总配额 (GB):</span>
-                        <input type="number" step="any" name="sub_quotas[]" placeholder="如: 1000 (留空按订阅)" style="width: 140px; padding: 3px 8px; font-size: 0.78rem;">
+                        <input type="number" step="any" name="sub_quotas[]" placeholder="留空自动匹配探针 (或填GB)" style="width: 150px; padding: 3px 8px; font-size: 0.78rem;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
                         <input type="text" name="sub_probe_ids[]" list="probe_nodes_datalist" placeholder="留空自动容错匹配 (或选填)" style="width: 190px; padding: 3px 8px; font-size: 0.78rem;">
                     </div>
                     <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                        * 留空将按分组名/节点名自动容错匹配；匹配不上时可在此选择或手动填写
+                        * 留空将自动容错匹配探针节点及总流量配额；亦可在此手动指定或修改
                     </span>
                 </div>
 

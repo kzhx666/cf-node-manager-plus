@@ -473,8 +473,18 @@ def parse_traffic_info(header_str, custom_total_gb=0):
     except:
         return None
 
+def bytes_to_gb_smart(b):
+    """将字节数转换为人性化 GB 数（支持二进制 GiB 与十进制 GB 智能对齐，如 1000GB / 10000GB）"""
+    if not b or b <= 0: return 0
+    gib = b / (1024**3)
+    gb = b / (1000**3)
+    if abs(gib - round(gib)) < 0.05: return int(round(gib))
+    if abs(gb - round(gb)) < 0.05: return int(round(gb))
+    val = round(gib, 2)
+    return int(val) if val.is_integer() else val
+
 async def fetch_komari_stats(session, komari_url, api_key=""):
-    """抓取 Komari 探针 (1.5+) 节点的实时进出网卡流量"""
+    """抓取 Komari 探针 (1.5+) 节点的实时进出网卡流量及总流量配额"""
     if not komari_url or not aiohttp: return {}
     komari_url = komari_url.strip().rstrip('/')
     if not komari_url.startswith('http'):
@@ -490,7 +500,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
     try:
         rpc_url = f"{komari_url}/api/rpc2"
         node_info_map = {}
-        # 1.1 获取节点列表（提取 UUID、节点名称 Name 与 traffic_limit）
+        # 1.1 获取节点列表（提取 UUID、节点名称 Name 与 traffic_limit 总流量限制）
         nodes_req = {"jsonrpc": "2.0", "method": "common:getNodes", "params": {}, "id": 1}
         async with session.post(rpc_url, json=nodes_req, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
             if r.status == 200:
@@ -499,16 +509,22 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                 if isinstance(data, dict):
                     for uid, c in data.items():
                         if isinstance(c, dict):
+                            lval = c.get('traffic_limit') or c.get('trafficLimit') or c.get('limit') or 0
+                            try: lval = int(lval)
+                            except: lval = 0
                             node_info_map[str(uid).lower()] = {
                                 "name": str(c.get('name', '')).strip(),
-                                "traffic_limit": int(c.get('traffic_limit') or 0)
+                                "traffic_limit": lval
                             }
                 elif isinstance(data, list):
                     for c in data:
                         if isinstance(c, dict) and c.get('uuid'):
+                            lval = c.get('traffic_limit') or c.get('trafficLimit') or c.get('limit') or 0
+                            try: lval = int(lval)
+                            except: lval = 0
                             node_info_map[str(c['uuid']).lower()] = {
                                 "name": str(c.get('name', '')).strip(),
-                                "traffic_limit": int(c.get('traffic_limit') or 0)
+                                "traffic_limit": lval
                             }
 
         # 1.2 获取节点最新流量状态（提取 net_total_up 与 net_total_down）
@@ -527,6 +543,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                             n_info = node_info_map.get(uid_str, {})
                             name = n_info.get('name', '')
                             limit = n_info.get('traffic_limit', 0)
+                            limit_gb = bytes_to_gb_smart(limit)
                             
                             entry = {
                                 "uuid": uid_str,
@@ -534,7 +551,8 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                                 "used": used,
                                 "up": up,
                                 "down": down,
-                                "limit": limit
+                                "limit": limit,
+                                "limit_gb": limit_gb
                             }
                             # 同时通过 UUID 和 节点名称 Name 建立双向索引，用户填哪一个都能匹配！
                             servers_map[uid_str] = entry
@@ -556,7 +574,10 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                             if not isinstance(c, dict): continue
                             uid = str(c.get('uuid') or '').strip()
                             name = str(c.get('name') or '').strip()
-                            limit = int(c.get('traffic_limit') or 0)
+                            lval = c.get('traffic_limit') or c.get('trafficLimit') or c.get('limit') or 0
+                            try: lval = int(lval)
+                            except: lval = 0
+                            limit_gb = bytes_to_gb_smart(lval)
                             if not uid: continue
                             
                             used = 0
@@ -571,7 +592,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                                             used = int(last_rec.get('net_total_up') or 0) + int(last_rec.get('net_total_down') or 0)
                             except: pass
                             
-                            entry = {"uuid": uid.lower(), "name": name, "used": used, "limit": limit}
+                            entry = {"uuid": uid.lower(), "name": name, "used": used, "limit": lval, "limit_gb": limit_gb}
                             servers_map[uid.lower()] = entry
                             if name:
                                 servers_map[name.lower()] = entry
@@ -1576,7 +1597,9 @@ async def async_process_subs():
                                 "uuid": str(v.get('uuid', '')),
                                 "id": str(v.get('id', '')),
                                 "name": str(v.get('name', '')),
-                                "used": v.get('used', 0)
+                                "used": v.get('used', 0),
+                                "limit": v.get('limit', 0),
+                                "limit_gb": v.get('limit_gb', 0)
                             })
                 d['cached_probe_nodes'] = unique_nodes_list
 
@@ -1651,6 +1674,13 @@ async def async_process_subs():
                         matched_name = matched_probe.get('name') or matched_probe.get('uuid') or ''
                     used_bytes = int(matched_probe.get('used', 0))
                     limit_bytes = int(matched_probe.get('limit', 0))
+                    probe_limit_gb = matched_probe.get('limit_gb', 0) or bytes_to_gb_smart(limit_bytes)
+
+                    # 🌟 核心特性：探针若有总流量配额限制（如 1000GB / 10TB），自动匹配并填写至 VPS 总配额！
+                    if quota_gb <= 0 and probe_limit_gb > 0:
+                        quota_gb = probe_limit_gb
+                        sub_item['quota_gb'] = probe_limit_gb
+
                     real_t = int(quota_gb * 1073741824) if quota_gb > 0 else (limit_bytes if limit_bytes > 0 else 0)
                     pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
                     probe_label = "Komari" if probe_type == 'komari' else "哪吒"
