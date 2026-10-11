@@ -800,6 +800,7 @@
                 <div style="display: flex; gap: 8px;">
                     <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(true)">✅ 全选启用</button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(false)">⏸️ 全选停用</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchAutoMatchProbes()" style="color: var(--primary); font-weight: 600;" title="对所有订阅源执行探针节点与总配额一键智能匹配">⚡ 一键智能匹配探针</button>
                     <button type="button" class="btn btn-primary btn-sm" onclick="addSub()">+ 添加订阅</button>
                 </div>
             </div>
@@ -854,7 +855,8 @@
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
-                                <input type="text" name="sub_probe_ids[]" list="probe_nodes_datalist" value="{{ sub.probe_id or sub.nezha_id or '' }}" placeholder="留空自动容错匹配 (或选填)" style="width: 190px; padding: 3px 8px; font-size: 0.78rem;">
+                                <input type="text" name="sub_probe_ids[]" list="probe_nodes_datalist" value="{{ sub.probe_id or sub.nezha_id or '' }}" placeholder="留空自动容错匹配 (或选填)" style="width: 175px; padding: 3px 8px; font-size: 0.78rem;">
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="triggerItemAutoMatch(this)" style="padding: 2px 8px; font-size: 0.72rem; color: var(--primary);" title="按分组名或节点内容智能匹配探针与总流量">⚡ 自动匹配</button>
                                 {% if sub.info and sub.info.matched_probe %}
                                 <span style="display: inline-flex; align-items: center; gap: 3px; font-size: 0.72rem; color: var(--success); background: var(--success-light); padding: 2px 6px; border-radius: var(--radius-sm); border: 1px solid rgba(16,185,129,0.25);" title="已成功关联探针节点">
                                     <span>✓ 关联: {{ sub.info.matched_probe }}</span>
@@ -862,7 +864,7 @@
                                 {% endif %}
                             </div>
                             <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                                * 留空将自动容错匹配探针节点及总流量配额；亦可在此手动指定或修改
+                                * 留空将自动容错匹配探针节点及总流量配额；亦可点击按钮或手动选择
                             </span>
                         </div>
 
@@ -1457,6 +1459,150 @@
         }
     }
 
+    function triggerItemAutoMatch(btn) {
+        const item = btn.closest('.sub-item');
+        if (!item) return;
+        const tagInput = item.querySelector('input[name="sub_tags[]"]');
+        const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
+        const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+        const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
+        
+        const tagName = tagInput ? tagInput.value.trim() : '';
+        const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
+        
+        if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
+            fetch('/api/probe_nodes')
+                .then(r => r.json())
+                .then(list => {
+                    window.CACHED_PROBE_NODES = list || [];
+                    execItemMatch(tagName, rawContent, probeInput, quotaInput);
+                })
+                .catch(() => showToast('请先在下方配置探针地址并点击保存同步', '⚠️'));
+            return;
+        }
+        execItemMatch(tagName, rawContent, probeInput, quotaInput);
+    }
+
+    function execItemMatch(tagName, rawContent, probeInput, quotaInput) {
+        if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
+            showToast('当前未探测到探针节点，请先保存探针地址并同步一次', '⚠️');
+            return;
+        }
+        let candidates = [];
+        if (tagName) candidates.push(tagName);
+        if (rawContent) {
+            const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
+            if (hashMatches) hashMatches.forEach(m => {
+                try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
+            });
+        }
+        
+        let best = null, bestScore = 0;
+        for (const cand of candidates) {
+            const cCand = cleanJsProbeStr(cand);
+            if (!cCand) continue;
+            for (const p of window.CACHED_PROBE_NODES) {
+                const cName = cleanJsProbeStr(p.name || '');
+                if (!cName) continue;
+                let score = 0;
+                if (cCand === cName) score = 0.95;
+                else if (cCand.includes(cName) || cName.includes(cCand)) {
+                    const shorter = Math.min(cCand.length, cName.length);
+                    const longer = Math.max(cCand.length, cName.length);
+                    if (shorter >= 2) score = 0.72 + 0.20 * (shorter / longer);
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = p;
+                }
+            }
+        }
+        
+        if (best && bestScore >= 0.70) {
+            if (probeInput) probeInput.value = best.name;
+            if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
+                quotaInput.value = best.limit_gb;
+            }
+            showToast(`成功匹配到探针: ${best.name}${best.limit_gb ? ' (总配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
+        } else {
+            showToast('未找到高相似度探针节点，可在输入框下拉选择或手动输入', 'ℹ️');
+        }
+    }
+
+    function batchAutoMatchProbes() {
+        const items = document.querySelectorAll('.sub-item');
+        if (!items.length) {
+            showToast('暂无订阅分组', 'ℹ️');
+            return;
+        }
+        
+        const doBatch = () => {
+            let matchedCount = 0;
+            items.forEach(item => {
+                const tagInput = item.querySelector('input[name="sub_tags[]"]');
+                const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
+                const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+                const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
+                
+                if (probeInput && !probeInput.value.trim()) {
+                    const tagName = tagInput ? tagInput.value.trim() : '';
+                    const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
+                    let candidates = [];
+                    if (tagName) candidates.push(tagName);
+                    if (rawContent) {
+                        const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
+                        if (hashMatches) hashMatches.forEach(m => {
+                            try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
+                        });
+                    }
+                    
+                    let best = null, bestScore = 0;
+                    for (const cand of candidates) {
+                        const cCand = cleanJsProbeStr(cand);
+                        if (!cCand) continue;
+                        for (const p of window.CACHED_PROBE_NODES) {
+                            const cName = cleanJsProbeStr(p.name || '');
+                            if (!cName) continue;
+                            let score = 0;
+                            if (cCand === cName) score = 0.95;
+                            else if (cCand.includes(cName) || cName.includes(cCand)) {
+                                score = 0.72 + 0.20 * (Math.min(cCand.length, cName.length) / Math.max(cCand.length, cName.length));
+                            }
+                            if (score > bestScore) {
+                                bestScore = score;
+                                best = p;
+                            }
+                        }
+                    }
+                    if (best && bestScore >= 0.70) {
+                        probeInput.value = best.name;
+                        if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
+                            quotaInput.value = best.limit_gb;
+                        }
+                        matchedCount++;
+                    }
+                }
+            });
+            if (matchedCount > 0) {
+                showToast(`一键智能匹配完成：已成功匹配 ${matchedCount} 个订阅节点与总流量！`, '🎉');
+            } else {
+                showToast('已扫描完成，所有节点均已匹配或无未匹配项', '💡');
+            }
+        };
+
+        if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
+            fetch('/api/probe_nodes')
+                .then(r => r.json())
+                .then(list => {
+                    window.CACHED_PROBE_NODES = list || [];
+                    doBatch();
+                })
+                .catch(() => showToast('无法读取探针节点，请先保存探针地址并同步', '⚠️'));
+        } else {
+            doBatch();
+        }
+    }
+
     function addSub() {
         const div = document.createElement('div');
         div.className = 'sub-item';
@@ -1484,10 +1630,11 @@
                     </div>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="font-size: 0.75rem; color: var(--text-muted);">绑定探针节点:</span>
-                        <input type="text" name="sub_probe_ids[]" list="probe_nodes_datalist" placeholder="留空自动容错匹配 (或选填)" style="width: 190px; padding: 3px 8px; font-size: 0.78rem;">
+                        <input type="text" name="sub_probe_ids[]" list="probe_nodes_datalist" placeholder="留空自动容错匹配 (或选填)" style="width: 175px; padding: 3px 8px; font-size: 0.78rem;">
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="triggerItemAutoMatch(this)" style="padding: 2px 8px; font-size: 0.72rem; color: var(--primary);" title="按分组名或节点内容智能匹配探针与总流量">⚡ 自动匹配</button>
                     </div>
                     <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
-                        * 留空将自动容错匹配探针节点及总流量配额；亦可在此手动指定或修改
+                        * 留空将自动容错匹配探针节点及总流量配额；亦可点击按钮或手动选择
                     </span>
                 </div>
 
