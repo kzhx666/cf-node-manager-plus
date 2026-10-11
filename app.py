@@ -259,29 +259,62 @@ def extract_speedtest_ips(content, limit=0):
     return candidates
 
 SMART_REGION_MAP = {
-    r"(?i)(美国|美|States|America|\bUS\b)": "🇺🇸 美国",
-    r"(?i)(香港|港|HongKong|\bHK\b)": "🇭🇰 香港",
-    r"(?i)(日本|日|Japan|\bJP\b)": "🇯🇵 日本",
-    r"(?i)(新加坡|新|Singapore|\bSG\b)": "🇸🇬 新加坡",
-    r"(?i)(台湾|台|Taiwan|\bTW\b)": "🇹🇼 台湾",
-    r"(?i)(韩国|韩|Korea|\bKR\b)": "🇰🇷 韩国",
-    r"(?i)(英国|英|United Kingdom|\bUK\b)": "🇬🇧 英国",
-    r"(?i)(德国|德|Germany|\bDE\b)": "🇩🇪 德国",
-    r"(?i)(法国|法|France|\bFR\b)": "🇫🇷 法国",
-    r"(?i)(俄罗斯|俄|Russia|\bRU\b)": "🇷🇺 俄罗斯",
-    r"(?i)(加拿大|加|Canada|\bCA\b)": "🇨🇦 加拿大",
-    r"(?i)(澳大利亚|澳|Australia|\bAU\b)": "🇦🇺 澳大利亚",
-    r"(?i)(印度|印|India|\bIN\b)": "🇮🇳 印度",
-    r"(?i)(荷兰|荷|Netherlands|\bNL\b)": "🇳🇱 荷兰",
-    r"(?i)(土耳其|土|Turkey|\bTR\b)": "🇹🇷 土耳其",
-    r"(?i)(巴西|巴|Brazil|\bBR\b)": "🇧🇷 巴西",
-    r"(?i)(阿根廷|Argentina|\bAR\b)": "🇦🇷 阿根廷",
-    r"(?i)(越南|Vietnam|\bVN\b)": "🇻🇳 越南",
-    r"(?i)(泰国|泰|Thailand|\bTH\b)": "🇹🇭 泰国",
-    r"(?i)(菲律宾|Philippines|\bPH\b)": "🇵🇭 菲律宾",
-    r"(?i)(马来西亚|Malaysia|\bMY\b)": "🇲🇾 马来西亚",
-    r"(?i)(印度尼西亚|Indonesia|\bID\b)": "🇮🇩 印尼",
+    r"(?i)(美国|美|States|America|\bUS\b|\bUSA\b|洛杉矶|硅谷|西雅图|芝加哥|纽约|达拉斯|圣何塞|凤凰城|波特兰|LAX|SJC|SEA|ORD|JFK|DFW|PHX)": "🇺🇸 美国",
+    r"(?i)(香港|港|HongKong|Hong Kong|\bHK\b|\bHKG\b)": "🇭🇰 香港",
+    r"(?i)(日本|日|Japan|\bJP\b|\bJPN\b|东京|大阪|TYO|OSA)": "🇯🇵 日本",
+    r"(?i)(新加坡|新|Singapore|\bSG\b|\bSGP\b|狮城|SIN)": "🇸🇬 新加坡",
+    r"(?i)(台湾|台|Taiwan|\bTW\b|\bTWN\b|台北|TPE)": "🇹🇼 台湾",
+    r"(?i)(韩国|韩|Korea|\bKR\b|\bKOR\b|首尔|ICN|SEL)": "🇰🇷 韩国",
+    r"(?i)(英国|英|United Kingdom|\bUK\b|\bGB\b|伦敦|LHR|LON)": "🇬🇧 英国",
+    r"(?i)(德国|德|Germany|\bDE\b|\bDEU\b|法兰克福|FRA)": "🇩🇪 德国",
+    r"(?i)(法国|法|France|\bFR\b|\bFRA\b|巴黎|CDG)": "🇫🇷 法国",
+    r"(?i)(俄罗斯|俄|Russia|\bRU\b|\bRUS\b|莫斯科|SVO)": "🇷🇺 俄罗斯",
+    r"(?i)(加拿大|加|Canada|\bCA\b|\bCAN\b|温哥华|多伦多|YVR|YYZ)": "🇨🇦 加拿大",
+    r"(?i)(澳大利亚|澳洲|澳|Australia|\bAU\b|\bAUS\b|悉尼|墨尔本|SYD|MEL)": "🇦🇺 澳大利亚",
+    r"(?i)(印度|印|India|\bIN\b|\bIND\b|孟买|BOM)": "🇮🇳 印度",
+    r"(?i)(荷兰|荷|Netherlands|\bNL\b|\bNLD\b|阿姆斯特丹|AMS)": "🇳🇱 荷兰",
+    r"(?i)(土耳其|土|Turkey|\bTR\b|\bTUR\b|伊斯坦布尔|IST)": "🇹🇷 土耳其",
+    r"(?i)(巴西|巴|Brazil|\bBR\b|\bBRA\b|圣保罗|GRU)": "🇧🇷 巴西",
+    r"(?i)(阿根廷|Argentina|\bAR\b|\bARG\b)": "🇦🇷 阿根廷",
+    r"(?i)(越南|Vietnam|\bVN\b|\bVNM\b|河内|胡志明|SGN|HAN)": "🇻🇳 越南",
+    r"(?i)(泰国|泰|Thailand|\bTH\b|\bTHA\b|曼谷|BKK)": "🇹🇭 泰国",
+    r"(?i)(菲律宾|Philippines|\bPH\b|\bPHL\b|马尼拉|MNL)": "🇵🇭 菲律宾",
+    r"(?i)(马来西亚|大马|Malaysia|\bMY\b|\bMYS\b|吉隆坡|KUL)": "🇲🇾 马来西亚",
+    r"(?i)(印度尼西亚|印尼|Indonesia|\bID\b|\bIDN\b|雅加达|CGK)": "🇮🇩 印尼",
 }
+
+# 匹配 Unicode 国旗 Emoji（区域指示符号对）
+FLAG_EMOJI_REGEX = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
+
+def get_node_flag(name="", tag="", server=""):
+    """从节点名称、分组标签或服务器地址智能识别国旗 Emoji"""
+    m = FLAG_EMOJI_REGEX.search(name or "")
+    if m:
+        return m.group(0)
+    
+    combined = f"{name or ''} {tag or ''} {server or ''}"
+    for p, f in SMART_REGION_MAP.items():
+        if re.search(p, combined):
+            return f.split(' ')[0]
+            
+    if server:
+        ip = DOMAIN_CACHE.get(server, server)
+        flag = get_flag(ip)
+        if flag and FLAG_EMOJI_REGEX.search(flag):
+            return flag
+            
+    return ""
+
+def ensure_node_flag(name_str, tag="", server=""):
+    """保证节点名称最前面带有国旗 Emoji，若已有则不重复添加"""
+    if not name_str:
+        name_str = "Node"
+    if FLAG_EMOJI_REGEX.search(name_str):
+        return name_str
+    flag = get_node_flag(name_str, tag, server)
+    if flag:
+        return f"{flag} {name_str}"
+    return name_str
 
 def safe_b64decode(s):
     if not s: return b""
@@ -324,14 +357,25 @@ def get_flag(ip):
     except: return ""
 
 async def smart_identify_region(node, tag):
-    name = node['name']; server = node['server']
-    for p, f in SMART_REGION_MAP.items():
-        if re.search(p, tag or name): return f"{f.split(' ')[0]} {tag or name}"
-    try:
-        ip = await resolve_domain_to_ip(server); flag = get_flag(ip)
-        if flag: return f"{flag} {tag or name}"
-    except: pass
-    return f"{tag}" if tag else "Node"
+    name = node.get('name', '')
+    server = node.get('server', '')
+    flag = get_node_flag(name, tag, server)
+    if not flag:
+        try:
+            ip = await resolve_domain_to_ip(server)
+            if ip:
+                geo_flag = get_flag(ip)
+                if geo_flag and FLAG_EMOJI_REGEX.search(geo_flag):
+                    flag = geo_flag
+        except:
+            pass
+            
+    base_name = name or tag or "Node"
+    if FLAG_EMOJI_REGEX.search(base_name):
+        return base_name
+    if flag:
+        return f"{flag} {base_name}"
+    return base_name
 
 def parse_traffic_info(header_str):
     if not header_str: return None
@@ -353,7 +397,85 @@ async def fetch_single_url(session, url, timeout):
                 info = parse_traffic_info(r.headers.get('Subscription-Userinfo', ''))
                 return text, info
     except: pass
-    return None, None
+def clash_to_internal(p):
+    if not isinstance(p, dict):
+        return None
+    t = str(p.get('type', '')).lower()
+    name = str(p.get('name', ''))
+    server = str(p.get('server', ''))
+    try: port = int(p.get('port', 443))
+    except: port = 443
+    node = {
+        'type': t,
+        'name': name,
+        'server': server,
+        'port': port
+    }
+    if p.get('tls'): node['tls'] = True
+    if p.get('servername') or p.get('sni'):
+        node['sni'] = p.get('servername') or p.get('sni')
+    if p.get('skip-cert-verify'): node['skip-cert-verify'] = True
+    if p.get('alpn'): node['alpn'] = p.get('alpn')
+    if p.get('client-fingerprint') or p.get('fp'):
+        node['fp'] = p.get('client-fingerprint') or p.get('fp')
+        
+    if t in ['vless', 'vmess']:
+        node['uuid'] = p.get('uuid', '')
+        if t == 'vmess':
+            node['alterId'] = int(p.get('alterId', 0))
+            node['cipher'] = p.get('cipher', 'auto')
+        if t == 'vless' and p.get('flow'):
+            node['flow'] = p.get('flow')
+        ropts = p.get('reality-opts') or {}
+        if ropts or p.get('reality'):
+            node['reality'] = True
+            node['pbk'] = ropts.get('public-key', '') or p.get('pbk', '')
+            node['sid'] = ropts.get('short-id', '') or p.get('sid', '')
+            
+    elif t == 'trojan':
+        node['password'] = p.get('password', '')
+        
+    elif t in ['hysteria2', 'hy2']:
+        node['type'] = 'hysteria2'
+        node['password'] = p.get('password', '') or p.get('auth', '')
+        if p.get('obfs'):
+            node['obfs'] = p.get('obfs')
+            node['obfs_password'] = p.get('obfs-password') or p.get('obfs_password', '')
+        if p.get('ports'):
+            node['ports'] = str(p.get('ports'))
+        if p.get('mport'):
+            node['ports'] = str(p.get('mport'))
+        if p.get('up'): node['up_mbps'] = p.get('up')
+        if p.get('down'): node['down_mbps'] = p.get('down')
+        
+    elif t == 'tuic':
+        node['uuid'] = p.get('uuid', '')
+        node['password'] = p.get('password', '')
+        node['congestion_control'] = p.get('congestion-controller') or p.get('congestion_control', 'bbr')
+        node['udp_relay_mode'] = p.get('udp-relay-mode') or p.get('udp_relay_mode', 'native')
+        
+    elif t == 'ss':
+        node['cipher'] = p.get('cipher', '')
+        node['password'] = p.get('password', '')
+        if p.get('plugin'):
+            node['plugin'] = p.get('plugin')
+            node['plugin_opts'] = p.get('plugin-opts', {})
+            
+    net = p.get('network', 'tcp')
+    node['network'] = net
+    if net == 'ws' or p.get('ws-opts'):
+        node['network'] = 'ws'
+        ws_opts = p.get('ws-opts', {})
+        node['ws-path'] = ws_opts.get('path', '/')
+        headers = ws_opts.get('headers', {})
+        if 'Host' in headers or 'host' in headers:
+            node['ws-host'] = headers.get('Host') or headers.get('host')
+    elif net == 'grpc' or p.get('grpc-opts'):
+        node['network'] = 'grpc'
+        grpc_opts = p.get('grpc-opts', {})
+        node['grpc-name'] = grpc_opts.get('grpc-service-name', '')
+        
+    return node
 
 def decode_sub_content(content):
     content = content.strip()
@@ -900,7 +1022,7 @@ def gen_singbox(n, ip=None, port=None, name=None):
                 return ['h3'] if ntype in ['hysteria2', 'tuic'] else []
             return [x.strip() for x in val.split(',') if x.strip()]
 
-        def build_tls():
+        def build_tls(allow_utls=True, default_alpn=None):
             sni = (n.get('sni') or n.get('servername') or '').strip()
             server_str = str(server)
             is_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_str) or ':' in server_str)
@@ -909,6 +1031,8 @@ def gen_singbox(n, ip=None, port=None, name=None):
             if sni: tls_obj["server_name"] = sni
             if insecure: tls_obj["insecure"] = True
             alpn = get_alpn_list(n)
+            if not alpn and default_alpn:
+                alpn = default_alpn
             if alpn: tls_obj["alpn"] = alpn
             if n.get('reality'):
                 tls_obj["reality"] = {
@@ -916,9 +1040,10 @@ def gen_singbox(n, ip=None, port=None, name=None):
                     "public_key": n.get('pbk', ''),
                     "short_id": n.get('sid', '')
                 }
-            fp = n.get('fp') or ('chrome' if n.get('reality') else None)
-            if fp:
-                tls_obj["utls"] = {"enabled": True, "fingerprint": fp}
+            if allow_utls:
+                fp = n.get('fp') or ('chrome' if n.get('reality') else None)
+                if fp:
+                    tls_obj["utls"] = {"enabled": True, "fingerprint": fp}
             return tls_obj
 
         def build_transport():
@@ -960,27 +1085,42 @@ def gen_singbox(n, ip=None, port=None, name=None):
             return sb
 
         elif ntype == 'hysteria2':
-            sb.update({"password": n.get('password', '')})
+            sb.update({
+                "server_port": port,
+                "password": n.get('password', '') or n.get('auth', '')
+            })
             if n.get('ports'):
                 parts = parse_ports_spec(n.get('ports'))
-                if parts:
-                    parts = [pp.replace(':', '-') for pp in parts]
-                    if port and str(port) != str(n.get('port')):
-                        orig_base = str(n.get('port'))
-                        parts = [pp for pp in parts if pp != orig_base]
-                        parts = [str(port)] + parts
-                    sb['server_ports'] = parts
-            if 'server_ports' not in sb:
-                sb['server_port'] = port
-            sb["tls"] = build_tls()
-            if n.get('obfs'):
-                sb['obfs'] = {"type": n.get('obfs', 'salamander'), "password": n.get('obfs_password') or n.get('obfs-password', '')}
+                range_parts = [pp.replace(':', '-') for pp in parts if '-' in pp]
+                if range_parts:
+                    sb['server_ports'] = range_parts
+            sb["tls"] = build_tls(allow_utls=False, default_alpn=['h3'])
+            obfs_pass = n.get('obfs_password') or n.get('obfs-password') or ''
+            if n.get('obfs') and obfs_pass:
+                sb['obfs'] = {"type": n.get('obfs') if n.get('obfs') in ['salamander'] else 'salamander', "password": obfs_pass}
+            if n.get('up_mbps'):
+                try: sb['up_mbps'] = int(n['up_mbps'])
+                except: pass
+            elif n.get('up'):
+                try: sb['up_mbps'] = int(re.sub(r'[^\d]', '', str(n['up'])))
+                except: pass
+            if n.get('down_mbps'):
+                try: sb['down_mbps'] = int(n['down_mbps'])
+                except: pass
+            elif n.get('down'):
+                try: sb['down_mbps'] = int(re.sub(r'[^\d]', '', str(n['down'])))
+                except: pass
             return sb
 
         elif ntype == 'tuic':
-            sb.update({"server_port": port, "uuid": n.get('uuid', ''), "password": n.get('password', ''), "congestion_control": n.get('congestion_control', 'bbr')})
+            sb.update({
+                "server_port": port,
+                "uuid": n.get('uuid', ''),
+                "password": n.get('password', ''),
+                "congestion_control": n.get('congestion_control', 'bbr')
+            })
             if n.get('udp_relay_mode'): sb['udp_relay_mode'] = n['udp_relay_mode']
-            sb["tls"] = build_tls()
+            sb["tls"] = build_tls(allow_utls=False, default_alpn=['h3'])
             return sb
 
         elif ntype == 'ss':
@@ -1325,6 +1465,7 @@ def api_nodes():
     nodes = copy.deepcopy(load_data().get('cached_nodes', []))
     for n in nodes:
         try:
+            n['name'] = ensure_node_flag(n.get('name', ''), n.get('_tag', ''), n.get('server', ''))
             n['uri'] = gen_uri(n) or ''
         except:
             n['uri'] = ''
@@ -1404,6 +1545,7 @@ def sub():
         node_name_base = clean_name if clean_name else name
         if tag and tag not in node_name_base: node_name_base = f"{node_name_base} {tag}"
         node_name_base = f"{node_name_base} {str(tag_counters[tag]).zfill(2)}"
+        node_name_base = ensure_node_flag(node_name_base, tag, n.get('server', ''))
         
         target_ips = [None]
         if not raw_mode:
@@ -1428,6 +1570,7 @@ def sub():
             
             node_name = node_name_base
             if not raw_mode and len(target_ips) > 1: node_name = f"{node_name_base}-{i+1}"
+            node_name = ensure_node_flag(node_name, tag, n.get('server', ''))
             
             obj = None
             if flag == 'clash': obj = gen_clash(n, ip, port, node_name)

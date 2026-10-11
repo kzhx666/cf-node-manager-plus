@@ -355,6 +355,23 @@
             cursor: grab;
             font-size: 1.1rem;
             user-select: none;
+            touch-action: none;
+        }
+        .sub-handle:active {
+            cursor: grabbing;
+        }
+        .sortable-ghost {
+            opacity: 0.35 !important;
+            background: var(--bg-hover) !important;
+            border: 2px dashed var(--primary) !important;
+        }
+        .sortable-chosen {
+            cursor: grabbing !important;
+        }
+        .sortable-fallback {
+            opacity: 0.95 !important;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45) !important;
+            cursor: grabbing !important;
         }
         .sub-name-input {
             flex: 1;
@@ -1089,7 +1106,37 @@
 </div>
 
 <script>
-    new Sortable(document.getElementById('sub-list'), { handle: '.sub-handle', animation: 150 });
+    let isDraggingSub = false;
+    window.addEventListener('wheel', function(e) {
+        if (isDraggingSub) {
+            window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+        }
+    }, { passive: true });
+
+    const subListEl = document.getElementById('sub-list');
+    if (subListEl) {
+        new Sortable(subListEl, {
+            handle: '.sub-handle',
+            animation: 180,
+            scroll: true,
+            scrollSensitivity: 120,
+            scrollSpeed: 25,
+            bubbleScroll: true,
+            forceFallback: true,
+            fallbackClass: 'sortable-fallback',
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            onStart: function() {
+                isDraggingSub = true;
+                document.body.style.userSelect = 'none';
+            },
+            onEnd: function() {
+                isDraggingSub = false;
+                document.body.style.userSelect = '';
+            }
+        });
+    }
+
     const BASE_URL = "{{ sub_url }}";
     const CUSTOM_GROUPS = "{{ data.config.custom_groups }}".split(/[,，]/).map(s=>s.trim()).filter(s=>s);
     let cachedNodes = [];
@@ -1106,14 +1153,61 @@
         setTimeout(() => t.classList.remove('show'), 2200);
     }
 
-    // Clipboard Copy
-    function copy(el) {
-        if (typeof el === 'string') {
-            navigator.clipboard.writeText(el).then(() => showToast("已复制到剪贴板！", "📋"));
+    // 强健跨协议剪贴板复制（支持 HTTP IP 环境与 HTTPS）
+    function copyToClipboard(text) {
+        if (!text) {
+            showToast("内容为空，无法复制", "⚠️");
             return;
         }
-        el.select();
-        navigator.clipboard.writeText(el.value).then(() => showToast("订阅链接已复制！", "📋"));
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("已成功复制到剪贴板！", "📋");
+            }).catch(() => {
+                fallbackCopyText(text);
+            });
+            return;
+        }
+        fallbackCopyText(text);
+    }
+
+    function fallbackCopyText(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.top = "-9999px";
+        textArea.style.left = "-9999px";
+        textArea.style.opacity = "0";
+        textArea.setAttribute("readonly", "");
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        textArea.setSelectionRange(0, 99999);
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showToast("已成功复制到剪贴板！", "📋");
+            } else {
+                showToast("复制失败，请手动选择复制", "❌");
+            }
+        } catch (err) {
+            showToast("复制失败，请手动选择复制", "❌");
+        } finally {
+            document.body.removeChild(textArea);
+        }
+    }
+
+    function copy(el) {
+        if (!el) return;
+        let text = "";
+        if (typeof el === 'string') {
+            text = el;
+        } else if (el.value !== undefined) {
+            text = el.value;
+            try { el.select(); } catch(e){}
+        } else if (el.innerText !== undefined) {
+            text = el.innerText;
+        }
+        copyToClipboard(text);
     }
 
     // QR Code
