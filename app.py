@@ -134,6 +134,7 @@ def load_data():
         "ips": DEFAULT_IPS,
         "remote_subs": [],
         "cached_nodes": [],
+        "cached_probe_nodes": [],
         "cf_api_url": "",
         "custom_doh": "",
         "max_ips_per_node": 0,
@@ -166,6 +167,7 @@ def load_data():
                 if "ips" not in d: d["ips"] = default_conf["ips"]
                 if "singbox_tpl" not in d: d["singbox_tpl"] = default_conf["singbox_tpl"]
                 if "clash_tpl" not in d: d["clash_tpl"] = default_conf["clash_tpl"]
+                if "cached_probe_nodes" not in d: d["cached_probe_nodes"] = []
                 if "web_password" not in d["config"]: d["config"]["web_password"] = WEB_PASSWORD
                 if "probe_type" not in d["config"]: d["config"]["probe_type"] = "komari"
                 if "probe_url" not in d["config"]: d["config"]["probe_url"] = d["config"].get("nezha_url", "")
@@ -614,17 +616,112 @@ async def fetch_nezha_stats(session, nezha_url, nezha_token=""):
                         net_out = int(status_obj.get('NetOutTransfer') or s.get('net_out_transfer') or 0)
                         total_transfer = net_in + net_out
                         
-                        servers_map[sid] = {
+                        entry = {
+                            "id": sid,
+                            "uuid": sid,
                             "name": name,
                             "in": net_in,
                             "out": net_out,
                             "used": total_transfer
                         }
+                        servers_map[sid] = entry
+                        if name:
+                            servers_map[name.lower()] = entry
                     if servers_map:
                         break
         except Exception:
             pass
     return servers_map
+
+def clean_probe_text(s):
+    """规整化探针节点匹配文本：去除Emoji、特殊字符与空格并转小写"""
+    if not s: return ""
+    s = re.sub(r'[\U0001F1E6-\U0001F1FF]{2}', '', str(s))
+    s = re.sub(r'[\U0001F300-\U0001FAFF]', '', s)
+    s = re.sub(r'[\u2600-\u27BF]', '', s)
+    s = s.lower().strip()
+    return re.sub(r'[\s\-_\.:\/\[\]\(\)\{\}\*#@!+=~`|\^]+', '', s)
+
+def score_probe_match(candidate, probe_entry):
+    """计算候选字符串与探针节点的容错匹配度得分 (0.0 ~ 1.0)"""
+    if not candidate or not probe_entry: return 0.0
+    cand_raw = str(candidate).strip()
+    cand_lower = cand_raw.lower()
+    
+    node_name = str(probe_entry.get('name', '')).strip()
+    node_uuid = str(probe_entry.get('uuid', '')).strip().lower()
+    node_id = str(probe_entry.get('id', '')).strip().lower()
+    
+    # 1. 绝对精确匹配 (UUID 或 ID)
+    if node_uuid and cand_lower == node_uuid:
+        return 1.0
+    if node_id and cand_lower == node_id:
+        return 1.0
+        
+    # 2. 名称完全精确匹配
+    if node_name and cand_raw == node_name:
+        return 1.0
+    if node_name and cand_lower == node_name.lower():
+        return 0.98
+        
+    # 3. 容错规整化匹配 (忽略大小写、空格、标点符号与国旗Emoji)
+    c_clean = clean_probe_text(cand_raw)
+    n_clean = clean_probe_text(node_name)
+    
+    if not c_clean or not n_clean:
+        return 0.0
+        
+    if c_clean == n_clean:
+        return 0.95
+        
+    # 4. 子串包含容错匹配 (例如 "Tokyo01" in "Tokyo01-BGP" 或 "甲骨文首尔" in "首尔")
+    if c_clean in n_clean or n_clean in c_clean:
+        shorter = min(len(c_clean), len(n_clean))
+        longer = max(len(c_clean), len(n_clean))
+        if shorter >= 2:
+            ratio = shorter / longer
+            return 0.72 + 0.20 * ratio
+            
+    # 5. 字符序列相似度容错 (difflib SequenceMatcher)
+    import difflib
+    sim = difflib.SequenceMatcher(None, c_clean, n_clean).ratio()
+    if sim >= 0.60:
+        return 0.60 + 0.32 * sim
+        
+    return 0.0
+
+def find_best_probe_node(candidates, probe_servers, min_threshold=0.68):
+    """
+    在一组候选文本（用户指定ID、订阅分组名、节点名等）中，
+    对所有探针节点计算容错匹配度，返回最佳匹配的探针节点 entry, 得分, 以及命中的候选词
+    """
+    if not candidates or not probe_servers: return None, 0.0, ""
+    
+    unique_nodes = []
+    seen_keys = set()
+    for k, v in probe_servers.items():
+        if isinstance(v, dict):
+            ukey = v.get('uuid') or v.get('id') or v.get('name')
+            if ukey and ukey not in seen_keys:
+                seen_keys.add(ukey)
+                unique_nodes.append(v)
+                
+    best_entry = None
+    best_score = 0.0
+    matched_cand = ""
+    
+    for cand in candidates:
+        if not cand or not str(cand).strip(): continue
+        for entry in unique_nodes:
+            score = score_probe_match(cand, entry)
+            if score > best_score:
+                best_score = score
+                best_entry = entry
+                matched_cand = str(cand).strip()
+                
+    if best_score >= min_threshold:
+        return best_entry, best_score, matched_cand
+    return None, 0.0, ""
 
 async def fetch_single_url(session, url, timeout):
     try:
@@ -1467,6 +1564,22 @@ async def async_process_subs():
                 except Exception as e:
                     write_log(f"Probe Sync Error ({probe_type}): {e}")
 
+            if probe_servers:
+                unique_nodes_list = []
+                seen_nodes = set()
+                for v in probe_servers.values():
+                    if isinstance(v, dict):
+                        k = v.get('uuid') or v.get('id') or v.get('name')
+                        if k and k not in seen_nodes:
+                            seen_nodes.add(k)
+                            unique_nodes_list.append({
+                                "uuid": str(v.get('uuid', '')),
+                                "id": str(v.get('id', '')),
+                                "name": str(v.get('name', '')),
+                                "used": v.get('used', 0)
+                            })
+                d['cached_probe_nodes'] = unique_nodes_list
+
             async def process_single_sub(session, sub_item):
                 raw_text = sub_item.get('url', '')
                 tag = sub_item.get('tag', '')
@@ -1509,18 +1622,39 @@ async def async_process_subs():
 
                 # 流量计算：优先使用探针实时数据 (Komari / 哪吒) -> 其次使用真实机场订阅信息 -> 自定义配额
                 matched_probe = None
-                if probe_id and probe_servers:
-                    if probe_id in probe_servers:
-                        matched_probe = probe_servers[probe_id]
-                    elif probe_id.lower() in probe_servers:
-                        matched_probe = probe_servers[probe_id.lower()]
+                matched_name = ""
+                auto_matched = False
+                
+                if probe_servers:
+                    # 1. 优先使用用户手动填写的绑定进行容错匹配
+                    if probe_id:
+                        matched_probe, score, mc = find_best_probe_node([probe_id], probe_servers, min_threshold=0.65)
+                    
+                    # 2. 如果用户未手动填写，或手动填写未匹配，执行自动智能容错匹配
+                    if not matched_probe:
+                        auto_cands = []
+                        if tag: auto_cands.append(tag)
+                        for dn in direct_nodes[:6]:
+                            if dn.get('name'): auto_cands.append(dn.get('name'))
+                        
+                        matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.68)
+                        if matched_probe:
+                            auto_matched = True
+                            matched_name = matched_probe.get('name') or matched_probe.get('uuid') or ''
+                            # 自动匹配成功且原先未填写时，将匹配到的探针名字直接填入 probe_id，让用户在界面看得到
+                            if not probe_id:
+                                sub_item['probe_id'] = matched_name
+                                sub_item['nezha_id'] = matched_name
 
                 if matched_probe:
+                    if not matched_name:
+                        matched_name = matched_probe.get('name') or matched_probe.get('uuid') or ''
                     used_bytes = int(matched_probe.get('used', 0))
                     limit_bytes = int(matched_probe.get('limit', 0))
                     real_t = int(quota_gb * 1073741824) if quota_gb > 0 else (limit_bytes if limit_bytes > 0 else 0)
                     pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
-                    expire_tag = "Komari实时" if probe_type == 'komari' else "哪吒实时"
+                    probe_label = "Komari" if probe_type == 'komari' else "哪吒"
+                    expire_tag = f"{probe_label}: {matched_name}" if matched_name else f"{probe_label}实时"
                     sub_item['info'] = {
                         "used": format_bytes_smart(used_bytes),
                         "used_bytes": used_bytes,
@@ -1530,7 +1664,9 @@ async def async_process_subs():
                         "has_total": real_t > 0,
                         "expire": expire_tag,
                         "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981"),
-                        "source": probe_type
+                        "source": probe_type,
+                        "matched_probe": matched_name,
+                        "auto_matched": auto_matched
                     }
                 elif fetched_info:
                     # 如果用户指定了该 VPS 的真实配额，使用用户设定的真实配额计算百分比
@@ -1858,6 +1994,11 @@ def api_nodes():
         except:
             n['uri'] = ''
     return jsonify(nodes)
+
+@app.route('/api/probe_nodes', methods=['GET'])
+def api_probe_nodes():
+    d = load_data()
+    return jsonify(d.get('cached_probe_nodes', []))
 
 @app.route('/api/node_delete', methods=['POST'])
 def api_node_delete():
