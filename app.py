@@ -430,6 +430,8 @@ def format_bytes_smart(bytes_val):
         mb = bytes_val / 1048576.0
         return f"{mb:.1f}MB".replace('.0MB', 'MB')
 
+app.jinja_env.globals.update(detect_country_info=detect_country_info, format_bytes_smart=format_bytes_smart)
+
 def is_fake_traffic(u, d, t, e):
     # 24TB dummy total (26388279066624 or 24576 * 1024^3) from subconverter
     if t == 26388279066624 or t == 24576 * 1073741824:

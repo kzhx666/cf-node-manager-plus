@@ -194,6 +194,21 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            width: 100%;
+        }
+        .stat-progress-bar {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 4px 0 2px 0;
+        }
+        .stat-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #06b6d4);
+            border-radius: 4px;
+            transition: width 0.5s ease;
         }
         .pulse-dot {
             width: 8px;
@@ -202,6 +217,8 @@
             background: var(--success);
             box-shadow: 0 0 8px var(--success);
             animation: pulse 2s infinite;
+            display: inline-block;
+            flex-shrink: 0;
         }
         @keyframes pulse {
             0% { transform: scale(0.95); opacity: 0.8; }
@@ -335,19 +352,29 @@
         .sub-item {
             background: var(--bg-elevated);
             border: 1px solid var(--card-border);
+            border-left: 3px solid rgba(16, 185, 129, 0.7);
             border-radius: var(--radius-md);
             overflow: hidden;
-            transition: all 0.2s;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .sub-item:hover {
             border-color: var(--card-hover-border);
-            box-shadow: var(--shadow-sm);
+            border-left-color: var(--primary);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+            transform: translateY(-1px);
+        }
+        .sub-item.sub-item-disabled {
+            border-left-color: rgba(156, 163, 175, 0.35);
+            opacity: 0.82;
+        }
+        .sub-item.sub-item-disabled:hover {
+            opacity: 1;
         }
         .sub-header {
             display: flex;
             align-items: center;
             padding: 10px 14px;
-            gap: 12px;
+            gap: 10px;
             cursor: pointer;
         }
         .sub-handle {
@@ -356,9 +383,67 @@
             font-size: 1.1rem;
             user-select: none;
             touch-action: none;
+            flex-shrink: 0;
+            transition: color 0.2s;
+        }
+        .sub-handle:hover {
+            color: var(--text);
         }
         .sub-handle:active {
             cursor: grabbing;
+        }
+        .sub-checkbox-wrap {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .sub-row-check {
+            display: none;
+        }
+        .sub-checkbox-mark {
+            width: 17px;
+            height: 17px;
+            border-radius: 5px;
+            border: 1.5px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.03);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .sub-checkbox-wrap:hover .sub-checkbox-mark {
+            border-color: var(--primary);
+        }
+        .sub-row-check:checked + .sub-checkbox-mark {
+            background: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+        }
+        .sub-row-check:checked + .sub-checkbox-mark::after {
+            content: '✓';
+            font-size: 11px;
+            color: #ffffff;
+            font-weight: 800;
+        }
+        .sub-country-flag {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 25px;
+            height: 25px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--card-border);
+            font-size: 0.95rem;
+            flex-shrink: 0;
+            user-select: none;
+            transition: transform 0.2s;
+        }
+        .sub-item:hover .sub-country-flag {
+            transform: scale(1.1);
         }
         .sortable-ghost {
             opacity: 0.35 !important;
@@ -463,6 +548,136 @@
         .traffic-progress-fill {
             height: 100%;
             border-radius: 3px;
+            transition: width 0.4s ease, background 0.4s ease;
+        }
+        .traffic-progress-fill.safe {
+            background: linear-gradient(90deg, #10b981, #34d399);
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+        }
+        .traffic-progress-fill.warn {
+            background: linear-gradient(90deg, #f59e0b, #fbbf24);
+            box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+        }
+        .traffic-progress-fill.danger {
+            background: linear-gradient(90deg, #ef4444, #f87171);
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+            animation: pulse-danger 1.5s infinite;
+        }
+        @keyframes pulse-danger {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .sub-filter-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.01);
+            flex-wrap: wrap;
+        }
+        .sub-search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 220px;
+            max-width: 320px;
+        }
+        .sub-search-icon {
+            position: absolute;
+            left: 11px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+        .sub-search-box input {
+            width: 100%;
+            padding: 6px 28px 6px 32px;
+            font-size: 0.82rem;
+            background: var(--input-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            color: var(--text);
+            outline: none;
+            transition: all 0.2s;
+        }
+        .sub-search-box input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+        .sub-search-clear {
+            position: absolute;
+            right: 10px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.95rem;
+            padding: 0 2px;
+        }
+        .sub-search-clear:hover {
+            color: var(--text);
+        }
+        .sub-country-chips {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .sub-country-chip {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--card-border);
+            color: var(--text-sec);
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .sub-country-chip:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: var(--text);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .sub-country-chip.active {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: #ffffff;
+            border-color: transparent;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
+            font-weight: 600;
+        }
+        .batch-action-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: rgba(99, 102, 241, 0.12);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+            animation: slideDown 0.2s ease-out;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .batch-action-count {
+            font-size: 0.82rem;
+            color: var(--primary);
+            font-weight: 600;
+        }
+        .batch-action-buttons {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .sub-empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
         }
         .sub-body {
             padding: 14px;
@@ -600,10 +815,11 @@
             bottom: 24px;
             background: var(--card-bg);
             backdrop-filter: blur(16px);
-            padding: 12px 24px;
+            -webkit-backdrop-filter: blur(16px);
+            padding: 10px 24px;
             border-radius: 50px;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--card-hover-border);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+            border: 1px solid var(--card-border);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -614,6 +830,59 @@
             margin-right: auto;
             gap: 20px;
             animation: bounceIn 0.3s ease-out;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .fab-bar.dirty {
+            border-color: rgba(245, 158, 11, 0.5);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 18px rgba(245, 158, 11, 0.25);
+        }
+        .fab-status-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .fab-status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            transition: all 0.3s;
+            flex-shrink: 0;
+        }
+        .fab-bar.dirty .fab-status-dot {
+            background: var(--warning);
+            box-shadow: 0 0 10px var(--warning);
+            animation: pulse 1.5s infinite;
+        }
+        .fab-status-texts {
+            display: flex;
+            flex-direction: column;
+        }
+        .fab-status-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text);
+            transition: color 0.3s;
+        }
+        .fab-bar.dirty .fab-status-title {
+            color: var(--warning);
+        }
+        .fab-status-desc {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+        .fab-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .fab-save-pulse {
+            animation: fab-btn-glow 2s infinite;
+        }
+        @keyframes fab-btn-glow {
+            0%, 100% { box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4); }
+            50% { box-shadow: 0 4px 25px rgba(99, 102, 241, 0.8), 0 0 10px rgba(99, 102, 241, 0.6); transform: scale(1.02); }
         }
         @keyframes bounceIn {
             from { transform: translateY(15px); opacity: 0; }
@@ -769,23 +1038,63 @@
     </div>
 
     <!-- Hero Stats Cards -->
+    {% set tot_used_b = namespace(val=0) %}
+    {% set tot_quota_b = namespace(val=0) %}
+    {% set active_subs_cnt = namespace(val=0) %}
+    {% for sub in data.remote_subs %}
+        {% if sub.enabled %}{% set active_subs_cnt.val = active_subs_cnt.val + 1 %}{% endif %}
+        {% if sub.info and sub.info.used_bytes %}{% set tot_used_b.val = tot_used_b.val + sub.info.used_bytes %}{% endif %}
+        {% if sub.info and sub.info.total_bytes %}{% set tot_quota_b.val = tot_quota_b.val + sub.info.total_bytes %}{% endif %}
+    {% endfor %}
+    {% set tot_pct = (tot_used_b.val / tot_quota_b.val * 100)|round(1) if tot_quota_b.val > 0 else 0 %}
+    {% set probe_online_count = (data.cached_probe_nodes or [])|length %}
+    {% set probe_cfg_type = data.config.probe_type or 'komari' %}
+
     <div class="stats-grid">
-        <div class="stat-card" onclick="showNodePreview()">
+        <div class="stat-card" onclick="showNodePreview()" title="点击查看全部节点池">
             <div class="stat-header">
                 <span class="stat-label">可用节点池</span>
                 <span class="stat-icon">🌐</span>
             </div>
-            <div class="stat-value" id="node-count-val">{{ node_count }}</div>
-            <div class="stat-sub">点击查看 / 筛选节点</div>
+            <div class="stat-value" id="node-count-val">{{ node_count }}<span style="font-size:0.9rem; font-weight:normal; opacity:0.7; margin-left:4px;">个</span></div>
+            <div class="stat-sub">
+                <span>已启用 <strong>{{ active_subs_cnt.val }}</strong> / {{ data.remote_subs|length }} 个订阅源</span>
+            </div>
         </div>
 
-        <div class="stat-card" onclick="document.getElementById('ips_area').focus()">
+        <div class="stat-card" onclick="document.getElementById('sub-list').scrollIntoView({behavior:'smooth'})" title="全局流量大盘">
             <div class="stat-header">
-                <span class="stat-label">优选 IP 库</span>
+                <span class="stat-label">本月流量大盘</span>
+                <span class="stat-icon">📊</span>
+            </div>
+            {% if tot_quota_b.val > 0 %}
+            <div class="stat-value" style="font-size: 1.3rem;">{{ format_bytes_smart(tot_used_b.val) }} <span style="font-size:0.85rem; font-weight:normal; opacity:0.7;">/ {{ format_bytes_smart(tot_quota_b.val) }}</span></div>
+            <div class="stat-sub" style="flex-direction: column; align-items: flex-start; gap: 3px;">
+                <div class="stat-progress-bar"><div class="stat-progress-fill" style="width: {{ [tot_pct, 100]|min }}%;"></div></div>
+                <div style="display: flex; justify-content: space-between; width: 100%; font-size: 0.72rem;">
+                    <span>全局配额使用率</span>
+                    <strong>{{ tot_pct }}%</strong>
+                </div>
+            </div>
+            {% else %}
+            <div class="stat-value" style="font-size: 1.45rem;">{{ format_bytes_smart(tot_used_b.val) or '0 MB' }}</div>
+            <div class="stat-sub">累计监控已消耗流量</div>
+            {% endif %}
+        </div>
+
+        <div class="stat-card" onclick="toggleAdvancedConfig()" title="探针服务状态">
+            <div class="stat-header">
+                <span class="stat-label">探针联机监控</span>
                 <span class="stat-icon">📡</span>
             </div>
-            <div class="stat-value" id="ip-count-val">--</div>
-            <div class="stat-sub">已载入有效 IP 库</div>
+            <div class="stat-value">{{ probe_online_count }}<span style="font-size:0.9rem; font-weight:normal; opacity:0.7; margin-left:4px;">节点在线</span></div>
+            <div class="stat-sub">
+                {% if probe_online_count > 0 %}
+                <span style="display:flex; align-items:center; gap:6px;"><span class="pulse-dot"></span><span style="color:var(--success);">{{ probe_cfg_type|upper }} 探针实时联机</span></span>
+                {% else %}
+                <span style="color:var(--text-muted);">暂未配置探针或离线</span>
+                {% endif %}
+            </div>
         </div>
 
         <div class="stat-card">
@@ -793,20 +1102,11 @@
                 <span class="stat-label">自动同步倒计时</span>
                 <span class="stat-icon">⏱️</span>
             </div>
-            <div class="stat-value" id="timer" style="font-size: 1.35rem;">--:--</div>
+            <div class="stat-value" id="timer" style="font-size: 1.45rem; font-family: 'JetBrains Mono', monospace;">--:--</div>
             <div class="stat-sub" style="justify-content: space-between;">
                 <span style="display:flex; align-items:center; gap:6px;"><span class="pulse-dot" id="sync-dot"></span><span id="sync-status-txt">空闲就绪</span></span>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="triggerSyncAll()" style="padding: 2px 6px; font-size: 0.72rem;">立即同步</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="triggerSyncAll()" style="padding: 2px 7px; font-size: 0.72rem; color: var(--primary);">立即同步</button>
             </div>
-        </div>
-
-        <div class="stat-card">
-            <div class="stat-header">
-                <span class="stat-label">订阅源配置</span>
-                <span class="stat-icon">📦</span>
-            </div>
-            <div class="stat-value">{{ data.remote_subs|length }}</div>
-            <div class="stat-sub">维护的上游节点来源</div>
         </div>
     </div>
 
@@ -865,12 +1165,50 @@
                 {% endfor %}
             </datalist>
 
+            <!-- Filter & Search Toolbar -->
+            <div class="sub-filter-toolbar">
+                <div class="sub-search-box">
+                    <span class="sub-search-icon">🔍</span>
+                    <input type="text" id="subSearchInput" placeholder="输入关键词实时过滤节点名、探针、国家..." oninput="onSubSearch(this.value)">
+                    <button type="button" id="subSearchClearBtn" class="sub-search-clear" onclick="clearSubSearch()" style="display: none;" title="清除输入">✕</button>
+                </div>
+                <div class="sub-country-chips" id="countryFilterContainer">
+                    <!-- Dynamic chips generated by JS -->
+                </div>
+            </div>
+
+            <!-- Batch Action Bar (Appears when 1+ checkboxes are checked) -->
+            <div id="batchActionBar" class="batch-action-bar" style="display: none;">
+                <div class="batch-action-count">
+                    <span>已选中 <strong id="batchSelectedCount">0</strong> 个订阅节点</span>
+                </div>
+                <div class="batch-action-buttons">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchActionSelected('enable')">✅ 批量启用</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchActionSelected('disable')">⏸️ 批量停用</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchActionSelected('match')">⚡ 智能匹配探针</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchActionSelected('delete')" style="color: var(--danger);">🗑️ 批量删除</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="deselectAllRows()">取消选择</button>
+                </div>
+            </div>
+
+            <div id="subEmptyPlaceholder" class="sub-empty-state" style="display: none;">
+                <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+                <div style="font-weight: 600; color: var(--text);">未找到匹配的订阅节点</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">尝试切换地区标签或清空搜索关键词</div>
+            </div>
+
             <div id="sub-list" class="sub-list">
                 {% for sub in data.remote_subs %}
-                <div class="sub-item" data-index="{{ loop.index0 }}">
+                {% set c_name, c_flag = detect_country_info(sub.tag) %}
+                <div class="sub-item {% if not sub.enabled %}sub-item-disabled{% endif %}" data-index="{{ loop.index0 }}" data-country="{{ c_name }}">
                     <div class="sub-header" onclick="toggleBody(this)">
-                        <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
-                        <input name="sub_tags[]" class="sub-name-input" value="{{ sub.tag }}" placeholder="未命名节点分组" oninput="autoMatchProbe(this)" onchange="autoMatchProbe(this)" onclick="event.stopPropagation()">
+                        <div class="sub-handle" onclick="event.stopPropagation()" title="按住拖拽排序">☰</div>
+                        <label class="sub-checkbox-wrap" onclick="event.stopPropagation()" title="勾选进行批量操作">
+                            <input type="checkbox" class="sub-row-check" onchange="onRowCheckChange()">
+                            <span class="sub-checkbox-mark"></span>
+                        </label>
+                        <span class="sub-country-flag" title="节点地区: {{ c_name }}">{{ c_flag }}</span>
+                        <input name="sub_tags[]" class="sub-name-input" value="{{ sub.tag }}" placeholder="未命名节点分组" oninput="autoMatchProbe(this); onSubNameInput(this);" onchange="autoMatchProbe(this); onSubNameInput(this);" onclick="event.stopPropagation()">
                         
                         <div class="probe-header-status" onclick="event.stopPropagation(); triggerRowAutoMatch(this);" title="点击为此节点自动匹配探针">
                             {% set bound_p = sub.probe_id or sub.nezha_id or (sub.info and sub.info.matched_probe) %}
@@ -885,7 +1223,7 @@
                         <div class="traffic-pill" title="已用流量 / 总配额">
                             {% if sub.info.has_total and sub.info.total %}
                             <div class="traffic-progress-bar">
-                                <div class="traffic-progress-fill" style="width: {{ sub.info.percent }}%; background: {{ sub.info.color }};"></div>
+                                <div class="traffic-progress-fill {% if sub.info.percent >= 90 %}danger{% elif sub.info.percent >= 75 %}warn{% else %}safe{% endif %}" style="width: {{ sub.info.percent }}%;"></div>
                             </div>
                             <span>{{ sub.info.used }} / {{ sub.info.total }}</span>
                             {% else %}
@@ -1060,11 +1398,18 @@
         </div>
 
         <!-- Sticky Floating Save Bar -->
-        <div class="fab-bar">
-            <span style="color: var(--text-sec); font-size: 0.88rem; display: flex; align-items: center; gap: 6px;">
-                <span>✨ 调整参数后请点击保存</span>
-            </span>
-            <button type="submit" class="btn btn-primary" style="padding: 10px 28px; border-radius: 40px; font-weight: 700;">💾 保存全部配置并同步</button>
+        <div class="fab-bar" id="stickyFabBar">
+            <div class="fab-status-wrapper">
+                <span class="fab-status-dot" id="fabStatusDot"></span>
+                <div class="fab-status-texts">
+                    <span class="fab-status-title" id="fabStatusTitle">配置已同步</span>
+                    <span class="fab-status-desc" id="fabStatusDesc">调整参数或节点后点击保存生效</span>
+                </div>
+            </div>
+            <div class="fab-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="fabDiscardBtn" onclick="discardFormChanges()" style="display: none;">↩️ 放弃修改</button>
+                <button type="submit" class="btn btn-primary" id="fabSaveBtn">💾 保存全部配置并同步</button>
+            </div>
         </div>
     </form>
 
@@ -1713,7 +2058,219 @@
             updateRowProbeBadge(item, '', 0);
             showToast('已设为自动容错匹配探针', '⚡');
         }
+        markFormDirty(true);
     }
+
+    // 动态同步更新节点旗帜与国家属性
+    function onSubNameInput(input) {
+        const item = input.closest('.sub-item');
+        if (!item) return;
+        const info = detectJsCountry(input.value.trim());
+        const flagEl = item.querySelector('.sub-country-flag');
+        if (flagEl) {
+            flagEl.innerText = info.flag;
+            flagEl.title = `节点地区: ${info.country}`;
+        }
+        item.setAttribute('data-country', info.country);
+        initCountryFilter();
+        markFormDirty(true);
+    }
+
+    // 国家快速筛选胶囊与即时搜索系统
+    let currentCountryFilter = 'ALL';
+    let currentSearchQuery = '';
+
+    function initCountryFilter() {
+        const container = document.getElementById('countryFilterContainer');
+        if (!container) return;
+        const items = document.querySelectorAll('.sub-item');
+        const countMap = {};
+        const flagMap = {};
+        let total = 0;
+
+        items.forEach(item => {
+            total++;
+            const tagInput = item.querySelector('input[name="sub_tags[]"]');
+            const cInfo = detectJsCountry(tagInput ? tagInput.value.trim() : '');
+            const c = cInfo.country || '其他';
+            countMap[c] = (countMap[c] || 0) + 1;
+            flagMap[c] = cInfo.flag || '🌐';
+            item.setAttribute('data-country', c);
+            const flagEl = item.querySelector('.sub-country-flag');
+            if (flagEl) flagEl.innerText = cInfo.flag;
+        });
+
+        const sortedCountries = Object.keys(countMap).sort((a, b) => {
+            if (a === '其他') return 1;
+            if (b === '其他') return -1;
+            return countMap[b] - countMap[a];
+        });
+
+        let html = `<div class="sub-country-chip ${currentCountryFilter === 'ALL' ? 'active' : ''}" onclick="filterByCountry('ALL')">全部 (${total})</div>`;
+        sortedCountries.forEach(c => {
+            const flag = flagMap[c] || '🌐';
+            const activeClass = (currentCountryFilter === c) ? 'active' : '';
+            html += `<div class="sub-country-chip ${activeClass}" onclick="filterByCountry('${c}')">${flag} ${c} (${countMap[c]})</div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    function filterByCountry(c) {
+        currentCountryFilter = c;
+        initCountryFilter();
+        applySubFilters();
+    }
+
+    function onSubSearch(val) {
+        currentSearchQuery = (val || '').toLowerCase().trim();
+        const clearBtn = document.getElementById('subSearchClearBtn');
+        if (clearBtn) clearBtn.style.display = currentSearchQuery ? 'block' : 'none';
+        applySubFilters();
+    }
+
+    function clearSubSearch() {
+        const input = document.getElementById('subSearchInput');
+        if (input) input.value = '';
+        onSubSearch('');
+    }
+
+    function applySubFilters() {
+        const items = document.querySelectorAll('.sub-item');
+        const emptyPlaceholder = document.getElementById('subEmptyPlaceholder');
+        let visibleCount = 0;
+
+        items.forEach(item => {
+            const itemCountry = item.getAttribute('data-country') || '其他';
+            const tagInput = item.querySelector('input[name="sub_tags[]"]');
+            const tagName = tagInput ? tagInput.value.toLowerCase() : '';
+            const selectEl = item.querySelector('.sub-probe-select');
+            const probeName = selectEl ? (selectEl.value || '').toLowerCase() : '';
+            const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
+            const urlText = urlTextarea ? urlTextarea.value.toLowerCase() : '';
+
+            let matchCountry = (currentCountryFilter === 'ALL' || itemCountry === currentCountryFilter);
+            let matchQuery = true;
+            if (currentSearchQuery) {
+                matchQuery = tagName.includes(currentSearchQuery) || 
+                             probeName.includes(currentSearchQuery) || 
+                             itemCountry.toLowerCase().includes(currentSearchQuery) ||
+                             urlText.includes(currentSearchQuery);
+            }
+
+            if (matchCountry && matchQuery) {
+                item.style.display = '';
+                visibleCount++;
+            } else {
+                item.style.display = 'none';
+            }
+        });
+
+        if (emptyPlaceholder) {
+            emptyPlaceholder.style.display = (visibleCount === 0 && items.length > 0) ? 'block' : 'none';
+        }
+    }
+
+    // 多选与批量操作
+    function onRowCheckChange() {
+        const checked = document.querySelectorAll('.sub-row-check:checked');
+        const count = checked.length;
+        const bar = document.getElementById('batchActionBar');
+        const countEl = document.getElementById('batchSelectedCount');
+        if (countEl) countEl.innerText = count;
+        if (bar) bar.style.display = count > 0 ? 'flex' : 'none';
+    }
+
+    function deselectAllRows() {
+        document.querySelectorAll('.sub-row-check').forEach(cb => { cb.checked = false; });
+        onRowCheckChange();
+    }
+
+    function batchActionSelected(act) {
+        const checked = Array.from(document.querySelectorAll('.sub-row-check:checked'));
+        if (!checked.length) return showToast('请先勾选需要操作的节点', '⚠️');
+        
+        if (act === 'enable') {
+            checked.forEach(cb => {
+                const item = cb.closest('.sub-item');
+                const toggle = item.querySelector('.sub-toggle-input');
+                const hidden = item.querySelector('.sub-enable-hidden');
+                if (toggle) toggle.checked = true;
+                if (hidden) hidden.value = '1';
+                item.classList.remove('sub-item-disabled');
+            });
+            showToast(`已批量启用选中的 ${checked.length} 个节点`, '✅');
+        } else if (act === 'disable') {
+            checked.forEach(cb => {
+                const item = cb.closest('.sub-item');
+                const toggle = item.querySelector('.sub-toggle-input');
+                const hidden = item.querySelector('.sub-enable-hidden');
+                if (toggle) toggle.checked = false;
+                if (hidden) hidden.value = '0';
+                item.classList.add('sub-item-disabled');
+            });
+            showToast(`已批量停用选中的 ${checked.length} 个节点`, '⏸️');
+        } else if (act === 'match') {
+            checked.forEach(cb => {
+                const item = cb.closest('.sub-item');
+                triggerItemAutoMatch(item);
+            });
+            showToast(`已为 ${checked.length} 个节点触发智能匹配`, '⚡');
+        } else if (act === 'delete') {
+            if (confirm(`确定批量删除选中的 ${checked.length} 个订阅节点吗？此操作无法撤销。`)) {
+                checked.forEach(cb => {
+                    const item = cb.closest('.sub-item');
+                    if (item) item.remove();
+                });
+                showToast(`已批量删除 ${checked.length} 个节点`, '🗑️');
+                initCountryFilter();
+                applySubFilters();
+            }
+        }
+        deselectAllRows();
+        markFormDirty(true);
+    }
+
+    // 未保存变更感知与浮动条管理
+    let formIsDirty = false;
+
+    function markFormDirty(dirty) {
+        formIsDirty = dirty;
+        const bar = document.getElementById('stickyFabBar');
+        const dot = document.getElementById('fabStatusDot');
+        const title = document.getElementById('fabStatusTitle');
+        const desc = document.getElementById('fabStatusDesc');
+        const discardBtn = document.getElementById('fabDiscardBtn');
+        const saveBtn = document.getElementById('fabSaveBtn');
+        if (!bar) return;
+
+        if (dirty) {
+            bar.classList.add('dirty');
+            if (title) title.innerText = '⚠️ 检测到未保存的修改';
+            if (desc) desc.innerText = '您修改了节点或参数配置，请点击右侧保存生效';
+            if (discardBtn) discardBtn.style.display = 'inline-flex';
+            if (saveBtn) saveBtn.classList.add('fab-save-pulse');
+        } else {
+            bar.classList.remove('dirty');
+            if (title) title.innerText = '配置已同步';
+            if (desc) desc.innerText = '调整参数或节点后点击保存生效';
+            if (discardBtn) discardBtn.style.display = 'none';
+            if (saveBtn) saveBtn.classList.remove('fab-save-pulse');
+        }
+    }
+
+    function discardFormChanges() {
+        if (confirm('确定放弃所有尚未保存的修改并重新加载页面吗？')) {
+            formIsDirty = false;
+            location.reload();
+        }
+    }
+
+    window.addEventListener('beforeunload', function(e) {
+        if (formIsDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
 
     function promptCustomProbe(btn) {
         const item = btn.closest('.sub-item');
@@ -1948,10 +2505,16 @@
     function addSub() {
         const div = document.createElement('div');
         div.className = 'sub-item';
+        div.setAttribute('data-country', '其他');
         div.innerHTML = `
             <div class="sub-header" onclick="toggleBody(this)">
-                <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
-                <input name="sub_tags[]" class="sub-name-input" placeholder="新订阅源名称" oninput="autoMatchProbe(this)" onchange="autoMatchProbe(this)" onclick="event.stopPropagation()">
+                <div class="sub-handle" onclick="event.stopPropagation()" title="按住拖拽排序">☰</div>
+                <label class="sub-checkbox-wrap" onclick="event.stopPropagation()" title="勾选进行批量操作">
+                    <input type="checkbox" class="sub-row-check" onchange="onRowCheckChange()">
+                    <span class="sub-checkbox-mark"></span>
+                </label>
+                <span class="sub-country-flag" title="节点地区">🌐</span>
+                <input name="sub_tags[]" class="sub-name-input" placeholder="新订阅源名称" oninput="autoMatchProbe(this); onSubNameInput(this);" onchange="autoMatchProbe(this); onSubNameInput(this);" onclick="event.stopPropagation()">
                 <div class="probe-header-status" onclick="event.stopPropagation(); triggerRowAutoMatch(this);" title="点击为此节点自动匹配探针">
                     <span class="probe-pill-unmatched">⚡ 自动匹配探针</span>
                 </div>
@@ -2000,6 +2563,9 @@
             </div>`;
         document.getElementById('sub-list').prepend(div);
         populateProbeSelect(div);
+        initCountryFilter();
+        applySubFilters();
+        markFormDirty(true);
     }
 
     function toggleAdvancedConfig() {
@@ -2543,6 +3109,16 @@
     
     initGroups();
     renderAllProbeSelects();
+    initCountryFilter();
+    applySubFilters();
+
+    const mainForm = document.getElementById('mainForm');
+    if (mainForm) {
+        mainForm.addEventListener('input', () => markFormDirty(true));
+        mainForm.addEventListener('change', () => markFormDirty(true));
+        mainForm.addEventListener('submit', () => { formIsDirty = false; });
+    }
+
     if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
         fetch('/api/probe_nodes')
             .then(r => r.json())
@@ -2550,6 +3126,7 @@
                 if (list && list.length) {
                     window.CACHED_PROBE_NODES = list;
                     renderAllProbeSelects();
+                    initCountryFilter();
                 }
             })
             .catch(() => {});
