@@ -1895,7 +1895,23 @@ async def async_process_subs():
                     valid_nodes.append(n)
                     
                 d['cached_nodes'] = valid_nodes
-                d['remote_subs'] = subs
+                # 安全合并：从磁盘重新读取最新数据，避免覆盖在异步期间新增或推送的订阅源
+                latest_d = load_data()
+                latest_subs = latest_d.get('remote_subs', [])
+                sub_info_map = {s.get('tag', ''): s.get('info') for s in subs if s.get('tag')}
+                sub_quota_map = {s.get('tag', ''): s.get('quota_gb') for s in subs if s.get('tag')}
+                for ls in latest_subs:
+                    ltag = ls.get('tag', '')
+                    if ltag in sub_info_map and sub_info_map[ltag] is not None:
+                        ls['info'] = sub_info_map[ltag]
+                    if ltag in sub_quota_map and sub_quota_map[ltag]:
+                        ls['quota_gb'] = sub_quota_map[ltag]
+                
+                latest_d['remote_subs'] = latest_subs
+                latest_d['cached_nodes'] = valid_nodes
+                if 'cached_probe_nodes' in d:
+                    latest_d['cached_probe_nodes'] = d['cached_probe_nodes']
+                d = latest_d
     except Exception as e:
         write_log(f"Subs Sync Fatal Error: {e}")
     finally:
@@ -2137,8 +2153,6 @@ def api_push_nodes():
     if not data_payload:
         data_payload = {}
     
-    tag = str(data_payload.get('tag', '')).strip()
-    raw_nodes = data_payload.get('nodes', '')
     replace = data_payload.get('replace', True)
     if isinstance(replace, str):
         replace = replace.lower() not in ('false', '0', 'no')
@@ -2146,64 +2160,103 @@ def api_push_nodes():
     if isinstance(trigger_sync, str):
         trigger_sync = trigger_sync.lower() not in ('false', '0', 'no')
 
-    # 支持 nodes 为字符串（换行分隔）或列表（数组）
-    if isinstance(raw_nodes, list):
-        nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
-        nodes_str = "\n".join(nodes_list)
-    else:
-        nodes_str = str(raw_nodes).strip()
-        nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
+    # 支持单源推送或多源批量推送 (sources: [...])
+    sources_input = data_payload.get('sources')
+    if not isinstance(sources_input, list) or not sources_input:
+        single_tag = str(data_payload.get('tag', '')).strip()
+        single_nodes = data_payload.get('nodes', '')
+        if single_tag and single_nodes:
+            sources_input = [{
+                "tag": single_tag,
+                "nodes": single_nodes,
+                "enabled": data_payload.get('enabled')
+            }]
+        else:
+            sources_input = []
 
-    if not tag:
-        return jsonify({"status": "error", "msg": "缺少必要参数: tag (订阅源名称)"}), 400
-    if not nodes_str:
-        return jsonify({"status": "error", "msg": "缺少必要参数: nodes (节点链接内容)"}), 400
+    if not sources_input:
+        return jsonify({"status": "error", "msg": "缺少必要参数: tag/nodes 或 sources 列表"}), 400
 
     d = load_data()
     subs = d.get('remote_subs', [])
+    processed_tags = []
+    items_to_insert = []
     
-    found_idx = -1
-    for idx, s in enumerate(subs):
-        if s.get('tag', '').strip() == tag:
-            found_idx = idx
-            break
+    for s_item in sources_input:
+        tag = str(s_item.get('tag', '')).strip()
+        raw_nodes = s_item.get('nodes', '')
+        if not tag or not raw_nodes:
+            continue
             
-    if found_idx >= 0:
-        if replace:
-            subs[found_idx]['url'] = nodes_str
-            subs[found_idx]['enabled'] = True
-            action_desc = "更新现有订阅源"
+        if isinstance(raw_nodes, list):
+            nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
+            nodes_str = "\n".join(nodes_list)
         else:
-            old_url = subs[found_idx].get('url', '').strip()
-            subs[found_idx]['url'] = f"{old_url}\n{nodes_str}".strip()
-            subs[found_idx]['enabled'] = True
-            action_desc = "追加节点到订阅源"
-    else:
-        new_sub = {
-            "url": nodes_str,
-            "tag": tag,
-            "enabled": True,
-            "quota_gb": 0,
-            "probe_id": "",
-            "nezha_id": "",
-            "info": None
-        }
-        subs.append(new_sub)
-        action_desc = "新建订阅源"
+            nodes_str = str(raw_nodes).strip()
+            nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
+        if not nodes_str:
+            continue
+
+        # 优选开关解析：优先显式传参；若未传，则根据节点/tag智能判断：argo 默认 True (开启优选)，非 argo 默认 False (关闭优选)
+        item_enabled = s_item.get('enabled')
+        if item_enabled is not None:
+            if isinstance(item_enabled, str):
+                item_enabled = item_enabled.lower() in ('1', 'true', 'yes')
+            else:
+                item_enabled = bool(item_enabled)
+        else:
+            is_argo = ('argo' in tag.lower()) or ('argo' in nodes_str.lower())
+            item_enabled = is_argo
+
+        # 检查是否已存在同名订阅源
+        found_idx = -1
+        for idx, s in enumerate(subs):
+            if s.get('tag', '').strip() == tag:
+                found_idx = idx
+                break
+                
+        if found_idx >= 0:
+            existing_sub = subs.pop(found_idx)
+            if replace:
+                existing_sub['url'] = nodes_str
+            else:
+                old_url = existing_sub.get('url', '').strip()
+                existing_sub['url'] = f"{old_url}\n{nodes_str}".strip()
+            existing_sub['enabled'] = item_enabled
+            items_to_insert.append(existing_sub)
+        else:
+            new_sub = {
+                "url": nodes_str,
+                "tag": tag,
+                "enabled": item_enabled,
+                "quota_gb": 0,
+                "probe_id": "",
+                "nezha_id": "",
+                "info": None
+            }
+            items_to_insert.append(new_sub)
+            
+        processed_tags.append(tag)
+
+    if not processed_tags:
+        return jsonify({"status": "error", "msg": "未提供有效的节点内容或订阅源名称"}), 400
+
+    # 按照正向顺序置顶到 subs 最前面 (管理页面最上面)
+    for item in reversed(items_to_insert):
+        subs.insert(0, item)
 
     d['remote_subs'] = subs
     save_data(d)
-    write_log(f"API Push: 成功{action_desc}【{tag}】，包含 {len(nodes_list)} 个节点")
+    write_log(f"API Push: 成功推送并置顶订阅源: {', '.join(processed_tags)}")
 
     if trigger_sync:
         threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
 
     return jsonify({
         "status": "success",
-        "msg": f"成功{action_desc}【{tag}】",
-        "tag": tag,
-        "action": action_desc,
-        "nodes_count": len(nodes_list)
+        "msg": f"成功推送并置顶订阅源【{', '.join(processed_tags)}】",
+        "tags": processed_tags,
+        "count": len(processed_tags)
     })
 
 @app.route('/api/sync_subs', methods=['POST'])
