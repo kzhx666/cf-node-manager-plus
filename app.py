@@ -1155,130 +1155,176 @@ def gen_singbox(n, ip=None, port=None, name=None):
     except:
         return None
 
-async def async_process_subs():
-    d = load_data(); subs = d.get('remote_subs', [])
-    if not subs: return
-    write_log("Sync Start (v42.31)")
-    cfg = d.get('config', {}); all_nodes = []
+def fetch_cf_ips(user_input):
+    """从给定的测速 API 订阅地址或优选域名拉取并提取优选 IP 列表"""
+    if not requests:
+        return False, "requests 依赖缺失", []
+    user_input = str(user_input or '').strip()
+    if not user_input:
+        return False, "API 地址为空", []
     
-    sem = asyncio.Semaphore(int(cfg.get('threads', 8))) 
-
-    async def process_single_sub(session, sub_item):
-        raw_text = sub_item.get('url', '')
-        tag = sub_item.get('tag', '')
-        enabled = sub_item.get('enabled', True)
+    target_url = user_input
+    if not user_input.startswith('http'):
+        target_url = f"https://{user_input}/sub?host=speed.cloudflare.com&uuid=00000000-0000-0000-0000-000000000000"
         
-        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-        
-        http_links = []
-        direct_nodes = []
-        raw_content_parts = []
-
-        for line in lines:
-            if line.startswith('http'):
-                http_links.append(line)
-            elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
-                node = parse_uri(line)
-                if node: 
-                    node['_tag'] = tag
-                    node['_opt'] = enabled
-                    direct_nodes.append(node)
-            else:
-                raw_content_parts.append(line)
-
-        async def fetch_job(url):
-            async with sem:
-                return await fetch_single_url(session, url, int(cfg.get('timeout', 20)))
-        
-        if http_links:
-            fetch_results = await asyncio.gather(*[fetch_job(u) for u in http_links])
-            for _, info in fetch_results:
-                if info: 
-                    sub_item['info'] = info
-                    break
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*'
+    }
+    try:
+        r = requests.get(target_url, timeout=20, verify=False, headers=headers, allow_redirects=True)
+        if r.status_code != 200:
+            return False, f"下载失败 (HTTP {r.status_code})", []
+        content = r.text
+        if not content:
+            return False, "返回内容为空", []
             
-            for text, _ in fetch_results:
-                if text: raw_content_parts.append(text)
-
-        if raw_content_parts:
-            combined_content = "\n".join(raw_content_parts)
-            decoded_nodes = decode_sub_content(combined_content)
-            for n in decoded_nodes:
-                n['_tag'] = tag
-                n['_opt'] = enabled
-                direct_nodes.append(n)
-        
-        return direct_nodes
-
-    async with aiohttp.ClientSession(headers={'User-Agent': cfg.get('ua', 'v2rayNG/1.8.5')}) as session:
-        tasks = [process_single_sub(session, sub) for sub in subs]
-        results = await asyncio.gather(*tasks)
-        
-        for nodes in results:
-            all_nodes.extend(nodes)
-        
-        unique = {}; valid_nodes = []
-        for n in all_nodes:
-            ports_fp = ''
-            if n.get('ports'):
-                ports_fp = str(n.get('ports'))
-            elif n.get('server_ports'):
-                ports_fp = ','.join([str(x) for x in n.get('server_ports')])
-            fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('server')}|{n.get('port')}|{ports_fp}"
-            if fp not in unique: unique[fp] = n
-        
-        for n in unique.values():
-            n['_clean_name'] = await smart_identify_region(n, n.get('_tag', ''))
-            valid_nodes.append(n)
+        extracted = extract_speedtest_ips(content)
+        if not extracted:
+            try:
+                clean_b64 = content.strip().replace('-', '+').replace('_', '/')
+                pad = len(clean_b64) % 4
+                if pad: clean_b64 += '=' * (4 - pad)
+                decoded = base64.b64decode(clean_b64).decode('utf-8', errors='ignore')
+                extracted = extract_speedtest_ips(decoded)
+            except:
+                pass
+                
+        if not extracted:
+            return False, "未在返回内容中找到有效 IP (格式不匹配)", []
             
-        d['cached_nodes'] = valid_nodes; d['remote_subs'] = subs; d['last_sync'] = int(time.time())
-        save_data(d); save_cache(); write_log(f"Sync End. Total: {len(valid_nodes)}")
+        return True, "成功", list(dict.fromkeys(extracted))
+    except Exception as e:
+        return False, f"网络请求异常: {e}", []
 
-def run_sync_thread(): 
-    try: asyncio.run(async_process_subs())
-    except Exception as e: write_log(f"Sync Error: {e}")
+async def async_process_subs():
+    d = load_data()
+    subs = d.get('remote_subs', [])
+    write_log(f"Sync Start (v43.00, subs: {len(subs)})")
+    cfg = d.get('config', {})
+    
+    try:
+        if subs:
+            all_nodes = []
+            sem = asyncio.Semaphore(int(cfg.get('threads', 8))) 
+
+            async def process_single_sub(session, sub_item):
+                raw_text = sub_item.get('url', '')
+                tag = sub_item.get('tag', '')
+                enabled = sub_item.get('enabled', True)
+                
+                lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                http_links = []; direct_nodes = []; raw_content_parts = []
+
+                for line in lines:
+                    if line.startswith('http'):
+                        http_links.append(line)
+                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
+                        node = parse_uri(line)
+                        if node: 
+                            node['_tag'] = tag; node['_opt'] = enabled; direct_nodes.append(node)
+                    else:
+                        raw_content_parts.append(line)
+
+                async def fetch_job(url):
+                    async with sem:
+                        return await fetch_single_url(session, url, int(cfg.get('timeout', 20)))
+                
+                if http_links:
+                    fetch_results = await asyncio.gather(*[fetch_job(u) for u in http_links], return_exceptions=True)
+                    for item in fetch_results:
+                        if isinstance(item, tuple) and len(item) == 2:
+                            text, info = item
+                            if info and not sub_item.get('info'): sub_item['info'] = info
+                            if text: raw_content_parts.append(text)
+
+                if raw_content_parts:
+                    combined_content = "\n".join(raw_content_parts)
+                    decoded_nodes = decode_sub_content(combined_content)
+                    for n in decoded_nodes:
+                        n['_tag'] = tag; n['_opt'] = enabled; direct_nodes.append(n)
+                
+                return direct_nodes
+
+            async with aiohttp.ClientSession(headers={'User-Agent': cfg.get('ua', 'v2rayNG/1.8.5')}) as session:
+                tasks = [process_single_sub(session, sub) for sub in subs]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, list): all_nodes.extend(res)
+                    elif isinstance(res, Exception): write_log(f"Sub Error: {res}")
+                
+                unique = {}; valid_nodes = []
+                for n in all_nodes:
+                    ports_fp = ''
+                    if n.get('ports'): ports_fp = str(n.get('ports'))
+                    elif n.get('server_ports'): ports_fp = ','.join([str(x) for x in n.get('server_ports')])
+                    fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('server')}|{n.get('port')}|{ports_fp}"
+                    if fp not in unique: unique[fp] = n
+                
+                for n in unique.values():
+                    n['_clean_name'] = await smart_identify_region(n, n.get('_tag', ''))
+                    valid_nodes.append(n)
+                    
+                d['cached_nodes'] = valid_nodes
+                d['remote_subs'] = subs
+    except Exception as e:
+        write_log(f"Subs Sync Fatal Error: {e}")
+    finally:
+        d['last_sync'] = int(time.time())
+        save_data(d)
+        save_cache()
+        write_log(f"Sync End. Nodes: {len(d.get('cached_nodes', []))}")
 
 def update_ips_with_separator(current_text, new_ips_list):
     manual_part = current_text.split(IP_SEPARATOR)[0].strip() if IP_SEPARATOR in current_text else current_text.strip()
     return f"{manual_part}\n\n{IP_SEPARATOR}\n" + "\n".join(new_ips_list)
 
+def run_sync_thread(include_ip_fetch=True): 
+    global IS_SYNCING
+    if IS_SYNCING:
+        write_log("Sync skipped: already running")
+        return
+    try:
+        IS_SYNCING = True
+        d = load_data()
+        
+        # 1. 如果配置了测速 API 地址，先行抓取并自动追加 IP 库
+        if include_ip_fetch and d.get('cf_api_url'):
+            api_url = str(d.get('cf_api_url', '')).strip()
+            if api_url:
+                write_log(f"Auto Fetching CF IPs from: {api_url}")
+                ok, msg, extracted = fetch_cf_ips(api_url)
+                if ok and extracted:
+                    d['ips'] = update_ips_with_separator(d.get('ips', ''), extracted)
+                    save_data(d)
+                    write_log(f"CF IP Auto-Updated: {len(extracted)} IPs")
+                else:
+                    write_log(f"CF IP Auto-Fetch Failed: {msg}")
+                    
+        # 2. 异步处理订阅源
+        asyncio.run(async_process_subs())
+    except Exception as e:
+        write_log(f"Sync Thread Error: {e}")
+    finally:
+        IS_SYNCING = False
+
 def auto_sync_task():
     global IS_SYNCING
-    write_log("Scheduler Started (v42.31)")
+    write_log("Scheduler Started (v43.00)")
     while True:
         try:
             time.sleep(5)
             if IS_SYNCING: continue
-            d = load_data(); interval = int(d.get('config', {}).get('interval', 14400))
-            if interval > 0 and time.time() - d.get('last_sync', 0) > interval:
-                IS_SYNCING = True; write_log("Auto Sync Triggered...")
-                if d.get('cf_api_url') and requests:
-                    try:
-                        api = d.get('cf_api_url')
-                        fetch_url = api
-                        if not api.startswith('http'): 
-                             fetch_url = f"https://{api}/sub?host=speed.cloudflare.com&uuid=00000000-0000-0000-0000-000000000000"
-                        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-                        r = requests.get(fetch_url, timeout=20, verify=False, headers=headers)
-                        if r.status_code == 200:
-                            content = r.text
-                            fetched_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b', content)
-                            if not fetched_ips:
-                                try:
-                                    pad = len(content) % 4
-                                    if pad: content += '=' * (4 - pad)
-                                    decoded = base64.b64decode(content).decode('utf-8', errors='ignore')
-                                    fetched_ips = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b', decoded)
-                                except: pass
-                            if fetched_ips:
-                                d['ips'] = update_ips_with_separator(d.get('ips', ''), list(set(fetched_ips)))
-                                save_data(d)
-                                write_log(f"Auto IP Updated: {len(fetched_ips)} IPs")
-                    except Exception as e: write_log(f"Auto IP Error: {e}")
-                asyncio.run(async_process_subs()); IS_SYNCING = False
+            d = load_data()
+            interval = int(d.get('config', {}).get('interval', 14400))
+            last = int(d.get('last_sync', 0))
+            now = time.time()
+            if interval > 0 and (now - last) >= interval:
+                write_log(f"Auto Sync Triggered (interval: {interval}s, elapsed: {int(now - last)}s)...")
+                run_sync_thread(include_ip_fetch=True)
         except Exception as e:
             write_log(f"Scheduler Critical Error: {e}")
-            time.sleep(60)
+            time.sleep(30)
 threading.Thread(target=auto_sync_task, daemon=True).start()
 
 @app.before_request
@@ -1330,7 +1376,7 @@ def api_status():
     raw_ips = d.get('ips', '').splitlines()
     ip_list = [x.strip() for x in raw_ips if x.strip() and IP_SEPARATOR not in x and "#####" not in x]
     interval = int(d.get('config', {}).get('interval', 14400))
-    last = d.get('last_sync', 0)
+    last = int(d.get('last_sync', 0))
     ttl = 0
     if interval > 0: ttl = max(0, int((last + interval) - time.time()))
     return jsonify({
@@ -1339,7 +1385,8 @@ def api_status():
         "ip_count": len(ip_list),
         "node_count": len(d.get('cached_nodes', [])),
         "is_syncing": IS_SYNCING,
-        "ttl": ttl
+        "ttl": ttl,
+        "ips": d.get('ips', '')
     })
 
 @app.route('/save', methods=['POST'])
@@ -1372,7 +1419,7 @@ def save():
             new_subs.append({"url": u.strip(), "tag": tags[i].strip(), "enabled": is_enabled, "info": old_info})
     d['remote_subs'] = new_subs
     save_data(d)
-    threading.Thread(target=run_sync_thread).start()
+    threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": True}).start()
     
     resp = make_response(redirect(f'/{LOGIN_PATH}?status=saved'))
     if new_web_password:
@@ -1382,31 +1429,18 @@ def save():
 @app.route('/api/fetch_ips', methods=['POST'])
 def api_fetch_ips():
     try:
-        if not requests: return jsonify({"status":"error", "msg":"requests missing"})
         user_input = request.json.get('url', '').strip()
         if not user_input: return jsonify({"status":"error", "msg":"输入为空"})
-        target_url = user_input
-        if not user_input.startswith('http'): target_url = f"https://{user_input}/sub?host=speed.cloudflare.com&uuid=00000000-0000-0000-0000-000000000000"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        r = requests.get(target_url, timeout=15, verify=False, headers=headers)
-        if r.status_code != 200: return jsonify({"status":"error", "msg":f"下载失败 (HTTP {r.status_code})"})
-        content = r.text
-        if not content: return jsonify({"status":"error", "msg":"返回内容为空"})
         
-        extracted = extract_speedtest_ips(content)
-        if not extracted:
-            try:
-                pad = len(content) % 4
-                if pad: content += '=' * (4 - pad)
-                decoded = base64.b64decode(content).decode('utf-8', errors='ignore')
-                extracted = extract_speedtest_ips(decoded)
-            except: pass
-        if not extracted: return jsonify({"status":"error", "msg":"未在返回内容中找到有效 IP (格式不匹配)"})
-        
+        ok, msg, extracted = fetch_cf_ips(user_input)
+        if not ok or not extracted:
+            return jsonify({"status":"error", "msg": msg})
+            
         d = load_data()
-        d['ips'] = update_ips_with_separator(d.get('ips', ''), list(set(extracted)))
+        d['ips'] = update_ips_with_separator(d.get('ips', ''), extracted)
         d['cf_api_url'] = user_input
         save_data(d)
+        write_log(f"Manual IP Fetch Success: {len(extracted)} IPs")
         return jsonify({"status":"success", "count": len(extracted), "ips": d['ips']})
     except Exception as e: return jsonify({"status":"error", "msg":str(e)})
 
@@ -1438,8 +1472,8 @@ def api_parse_csv_ips():
 
 @app.route('/api/sync_subs', methods=['POST'])
 def api_sync_subs():
-    threading.Thread(target=run_sync_thread).start()
-    return jsonify({"msg": "已触发全量同步"})
+    threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": True}).start()
+    return jsonify({"msg": "已触发全量同步任务（含优选 IP 与节点）"})
 
 @app.route('/api/sync_single', methods=['POST'])
 def api_sync_single():

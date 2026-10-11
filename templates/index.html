@@ -1579,6 +1579,15 @@
             if (ipEl) ipEl.innerText = d.ip_count;
             if (nodeEl) nodeEl.innerText = d.node_count;
 
+            const ipArea = document.getElementById('ips_area');
+            if (ipArea && document.activeElement !== ipArea && d.ips !== undefined) {
+                const currentSync = String(d.last_sync || '');
+                if (ipArea.getAttribute('data-sync-tag') !== currentSync && currentSync !== '') {
+                    ipArea.value = d.ips;
+                    ipArea.setAttribute('data-sync-tag', currentSync);
+                }
+            }
+
             if (d.is_syncing) {
                 if (timerEl) timerEl.innerText = "同步中...";
                 if (statusTxt) statusTxt.innerText = "正在同步订阅...";
