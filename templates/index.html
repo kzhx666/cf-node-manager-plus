@@ -399,6 +399,49 @@
             color: var(--text-sec);
             border: 1px solid var(--card-border);
         }
+        .probe-header-status {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 4px;
+            margin-right: 6px;
+        }
+        .probe-pill-matched {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.28);
+            border-radius: 14px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            color: #10b981;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .probe-pill-matched:hover {
+            background: rgba(16, 185, 129, 0.2);
+        }
+        .probe-pill-unmatched {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px dashed rgba(99, 102, 241, 0.35);
+            border-radius: 14px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            color: var(--primary);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .probe-pill-unmatched:hover {
+            background: rgba(99, 102, 241, 0.18);
+            transform: translateY(-1px);
+        }
         .traffic-progress-bar {
             width: 48px;
             height: 6px;
@@ -797,10 +840,10 @@
         <div class="card" style="margin-top: 16px;">
             <div class="card-header">
                 <span class="card-title">🔗 节点与订阅源列表</span>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(true)">✅ 全选启用</button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="batchToggle(false)">⏸️ 全选停用</button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="batchAutoMatchProbes()" style="color: var(--primary); font-weight: 600;" title="对所有订阅源执行探针节点与总配额一键智能匹配">⚡ 一键智能匹配探针</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="batchAutoMatchProbes()" style="background: linear-gradient(135deg, #6366f1, #06b6d4); font-weight: 600; border: none; box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35); padding: 5px 14px;" title="根据名称智能容错匹配探针，并自动同步每个VPS的真实总流量配额">⚡ 一键智能匹配探针与配额</button>
                     <button type="button" class="btn btn-primary btn-sm" onclick="addSub()">+ 添加订阅</button>
                 </div>
             </div>
@@ -817,6 +860,15 @@
                     <div class="sub-header" onclick="toggleBody(this)">
                         <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
                         <input name="sub_tags[]" class="sub-name-input" value="{{ sub.tag }}" placeholder="未命名节点分组" oninput="autoMatchProbe(this)" onchange="autoMatchProbe(this)" onclick="event.stopPropagation()">
+                        
+                        <div class="probe-header-status" onclick="event.stopPropagation(); triggerRowAutoMatch(this);" title="点击为此节点自动匹配探针">
+                            {% set bound_p = sub.probe_id or sub.nezha_id or (sub.info and sub.info.matched_probe) %}
+                            {% if bound_p %}
+                            <span class="probe-pill-matched">🎯 {{ bound_p }}{% if sub.quota_gb %} ({{ sub.quota_gb }}G){% endif %}</span>
+                            {% else %}
+                            <span class="probe-pill-unmatched">⚡ 自动匹配探针</span>
+                            {% endif %}
+                        </div>
                         
                         {% if sub.info and sub.info.used %}
                         <div class="traffic-pill" title="已用流量 / 总配额">
@@ -835,6 +887,7 @@
                         {% endif %}
 
                         <div class="actions" onclick="event.stopPropagation()" style="display: flex; gap: 4px; align-items: center;">
+                            <button type="button" class="btn-icon" onclick="triggerRowAutoMatch(this)" title="智能匹配探针与配额" style="color: #6366f1; font-weight: bold; font-size: 0.95rem;">⚡</button>
                             <button type="button" class="btn-icon" onclick="syncSingle({{ loop.index0 }})" title="单独刷新此订阅">🔄</button>
                             <button type="button" class="btn-icon" onclick="moveTop(this)" title="置顶">⬆️</button>
                             <button type="button" class="btn-icon" onclick="moveBottom(this)" title="置底">⬇️</button>
@@ -1409,11 +1462,101 @@
 
     window.CACHED_PROBE_NODES = {{ (data.cached_probe_nodes or []) | tojson }};
 
+    const CN_NUMS_JS = { '零':'0', '一':'1', '二':'2', '两':'2', '三':'3', '四':'4', '五':'5', '六':'6', '七':'7', '八':'8', '九':'9', '十':'10' };
+    const STRIP_SUFFIXES_JS = ['本机', '优选', '中转', '直连', '备用', '节点', '专线', '测试', '自建', '落地', '电信', '联通', '移动', 'bgp', 'gia', 'cmi', 'ipv4', 'ipv6', 'v4', 'v6'];
+    const SPEC_PATTERNS_JS = [/\d+c\d+g/g, /\d+c/g, /\d+g/g, /玩具/g, /家宽/g, /无限流量/g, /优化/g, /原生/g, /动态/g, /静态/g];
+    const PROBE_COUNTRIES_JS = ['美国', '香港', '日本', '新加坡', '德国', '英国', '韩国', '台湾', '荷兰', '法国', '加拿大', '澳大利亚', '俄罗斯', '芬兰'];
+
     function cleanJsProbeStr(s) {
         if (!s) return "";
-        return s.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
-                .toLowerCase()
-                .replace(/[\s\-_\.:\/\[\]\(\)\{\}\*#@!+=~`|\^]+/g, '');
+        let str = String(s).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').toLowerCase().trim();
+        for (let k in CN_NUMS_JS) {
+            str = str.split(k).join(CN_NUMS_JS[k]);
+        }
+        str = str.replace(/([a-z]+)o(\d+)/g, '$10$2').replace(/(\d+)o([a-z]+)/g, '$10$2');
+        return str.replace(/[\s\-_\.:\/\[\]\(\)\{\}\*#@!+=~`|\^]+/g, '');
+    }
+
+    function extractJsProbeFeatures(s) {
+        let norm = cleanJsProbeStr(s);
+        if (!norm) return { norm: "", core: "" };
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (let suf of STRIP_SUFFIXES_JS) {
+                if (norm.endsWith(suf) && norm.length > suf.length + 1) {
+                    norm = norm.substring(0, norm.length - suf.length);
+                    changed = true;
+                }
+            }
+        }
+        let core = norm;
+        for (let sp of SPEC_PATTERNS_JS) {
+            core = core.replace(sp, '');
+        }
+        core = core.replace(/[\s\-_\.:]+/g, '');
+        return { norm: norm, core: core.length >= 2 ? core : norm };
+    }
+
+    function checkJsPrefixConflict(s1, s2) {
+        for (let c of PROBE_COUNTRIES_JS) {
+            if (s1.includes(c) && s2.includes(c)) {
+                let p1 = s1.split(c)[0];
+                let p2 = s2.split(c)[0];
+                if (p1 && p2 && p1 !== p2) {
+                    // 若前缀品牌完全不相同且不互相包含，判定商家冲突
+                    if (!p1.includes(p2) && !p2.includes(p1)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function scoreJsProbeMatch(candRaw, probeEntry) {
+        if (!candRaw || !probeEntry) return 0;
+        const pName = String(probeEntry.name || '').trim();
+        const pUuid = String(probeEntry.uuid || '').toLowerCase().trim();
+        const cRaw = String(candRaw).trim();
+        const cLower = cRaw.toLowerCase();
+
+        if (pUuid && cLower === pUuid) return 1.0;
+        if (pName && cRaw === pName) return 1.0;
+        if (pName && cLower === pName.toLowerCase()) return 0.98;
+
+        const cf = extractJsProbeFeatures(cRaw);
+        const pf = extractJsProbeFeatures(pName);
+        if (!cf.norm || !pf.norm) return 0;
+
+        if (checkJsPrefixConflict(cf.norm, pf.norm)) return 0;
+
+        if (cf.norm === pf.norm) return 0.96;
+        if (cf.core && pf.core && cf.core === pf.core && cf.core.length >= 3) return 0.93;
+
+        if (cf.norm.includes(pf.norm) || pf.norm.includes(cf.norm)) {
+            const shorter = Math.min(cf.norm.length, pf.norm.length);
+            const longer = Math.max(cf.norm.length, pf.norm.length);
+            if (shorter >= 2) return 0.75 + 0.20 * (shorter / longer);
+        }
+
+        if (cf.core && pf.core && (cf.core.includes(pf.core) || pf.core.includes(cf.core))) {
+            const shorter = Math.min(cf.core.length, pf.core.length);
+            const longer = Math.max(cf.core.length, pf.core.length);
+            if (shorter >= 3) return 0.70 + 0.20 * (shorter / longer);
+        }
+
+        return 0;
+    }
+
+    function updateRowProbeBadge(item, probeName, quotaGb) {
+        if (!item) return;
+        const statusEl = item.querySelector('.probe-header-status');
+        if (!statusEl) return;
+        if (probeName) {
+            const quotaTxt = quotaGb ? ` (${quotaGb}G)` : '';
+            statusEl.innerHTML = `<span class="probe-pill-matched" title="已成功关联探针节点">🎯 ${probeName}${quotaTxt}</span>`;
+        } else {
+            statusEl.innerHTML = `<span class="probe-pill-unmatched" title="点击为此节点自动匹配探针">⚡ 自动匹配探针</span>`;
+        }
     }
 
     function autoMatchProbe(tagInput) {
@@ -1422,45 +1565,43 @@
         const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
         if (!probeInput) return;
         
-        // 如果用户已经手动填写了特定探针名称/UUID，不强行覆盖
-        if (probeInput.value.trim() !== '') return;
+        // 如果用户已输入特定 probe_id，不强行覆盖，但更新徽章
+        if (probeInput.value.trim() !== '') {
+            const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+            updateRowProbeBadge(item, probeInput.value.trim(), quotaInput ? quotaInput.value.trim() : '');
+            return;
+        }
         
         const tagVal = tagInput.value.trim();
         if (!tagVal || !window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) return;
         
-        const cTag = cleanJsProbeStr(tagVal);
-        if (!cTag) return;
-        
         let best = null, bestScore = 0;
         for (const p of window.CACHED_PROBE_NODES) {
-            const pName = p.name || '';
-            const cName = cleanJsProbeStr(pName);
-            if (!cName) continue;
-            let score = 0;
-            if (cTag === cName) {
-                score = 0.95;
-            } else if (cTag.includes(cName) || cName.includes(cTag)) {
-                const shorter = Math.min(cTag.length, cName.length);
-                const longer = Math.max(cTag.length, cName.length);
-                if (shorter >= 2) score = 0.72 + 0.20 * (shorter / longer);
-            }
+            const score = scoreJsProbeMatch(tagVal, p);
             if (score > bestScore) {
                 bestScore = score;
                 best = p;
             }
         }
-        if (best && bestScore >= 0.70) {
+        if (best && bestScore >= 0.65) {
             probeInput.value = best.name;
             const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
             if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
                 quotaInput.value = best.limit_gb;
             }
-            showToast(`智能匹配探针: ${best.name}${best.limit_gb ? ' (配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
+            updateRowProbeBadge(item, best.name, best.limit_gb);
+            showToast(`智能关联探针: ${best.name}${best.limit_gb ? ' (配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
         }
     }
 
-    function triggerItemAutoMatch(btn) {
-        const item = btn.closest('.sub-item');
+    function triggerRowAutoMatch(btnOrBadge) {
+        const item = btnOrBadge.closest('.sub-item');
+        if (!item) return;
+        triggerItemAutoMatch(item);
+    }
+
+    function triggerItemAutoMatch(target) {
+        const item = target.closest('.sub-item') || target;
         if (!item) return;
         const tagInput = item.querySelector('input[name="sub_tags[]"]');
         const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
@@ -1471,21 +1612,22 @@
         const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
         
         if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
-            fetch('/api/probe_nodes')
+            showToast('正在从探针同步节点列表...', '🔄');
+            fetch('/api/probe_nodes?refresh=1')
                 .then(r => r.json())
                 .then(list => {
                     window.CACHED_PROBE_NODES = list || [];
-                    execItemMatch(tagName, rawContent, probeInput, quotaInput);
+                    execItemMatch(item, tagName, rawContent, probeInput, quotaInput);
                 })
-                .catch(() => showToast('请先在下方配置探针地址并点击保存同步', '⚠️'));
+                .catch(() => showToast('无法连接探针服务器，请在高级参数中检查探针配置', '⚠️'));
             return;
         }
-        execItemMatch(tagName, rawContent, probeInput, quotaInput);
+        execItemMatch(item, tagName, rawContent, probeInput, quotaInput);
     }
 
-    function execItemMatch(tagName, rawContent, probeInput, quotaInput) {
+    function execItemMatch(item, tagName, rawContent, probeInput, quotaInput) {
         if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
-            showToast('当前未探测到探针节点，请先保存探针地址并同步一次', '⚠️');
+            showToast('当前探针无在线节点，请先在参数设置中保存探针地址', '⚠️');
             return;
         }
         let candidates = [];
@@ -1499,18 +1641,9 @@
         
         let best = null, bestScore = 0;
         for (const cand of candidates) {
-            const cCand = cleanJsProbeStr(cand);
-            if (!cCand) continue;
+            if (!cand) continue;
             for (const p of window.CACHED_PROBE_NODES) {
-                const cName = cleanJsProbeStr(p.name || '');
-                if (!cName) continue;
-                let score = 0;
-                if (cCand === cName) score = 0.95;
-                else if (cCand.includes(cName) || cName.includes(cCand)) {
-                    const shorter = Math.min(cCand.length, cName.length);
-                    const longer = Math.max(cCand.length, cName.length);
-                    if (shorter >= 2) score = 0.72 + 0.20 * (shorter / longer);
-                }
+                const score = scoreJsProbeMatch(cand, p);
                 if (score > bestScore) {
                     bestScore = score;
                     best = p;
@@ -1518,12 +1651,13 @@
             }
         }
         
-        if (best && bestScore >= 0.70) {
+        if (best && bestScore >= 0.65) {
             if (probeInput) probeInput.value = best.name;
             if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
                 quotaInput.value = best.limit_gb;
             }
-            showToast(`成功匹配到探针: ${best.name}${best.limit_gb ? ' (总配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
+            updateRowProbeBadge(item, best.name, best.limit_gb);
+            showToast(`成功匹配到探针: ${best.name}${best.limit_gb ? ' (配额: ' + best.limit_gb + 'GB)' : ''}`, '🎯');
         } else {
             showToast('未找到高相似度探针节点，可在输入框下拉选择或手动输入', 'ℹ️');
         }
@@ -1536,71 +1670,88 @@
             return;
         }
         
-        const doBatch = () => {
-            let matchedCount = 0;
-            items.forEach(item => {
-                const tagInput = item.querySelector('input[name="sub_tags[]"]');
-                const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
-                const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
-                const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
-                
-                if (probeInput && !probeInput.value.trim()) {
-                    const tagName = tagInput ? tagInput.value.trim() : '';
-                    const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
-                    let candidates = [];
-                    if (tagName) candidates.push(tagName);
-                    if (rawContent) {
-                        const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
-                        if (hashMatches) hashMatches.forEach(m => {
-                            try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
-                        });
-                    }
+        showToast('正在智能匹配探针并拉取配额...', '⚡');
+        
+        // 优先调用后端全量匹配接口（包含完整正则、繁简数字归一及自动保存到 data.json）
+        fetch('/api/auto_match_all', { method: 'POST' })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'ok') {
+                    // 同步更新前端各行的值与徽章
+                    const detailsMap = {};
+                    (res.details || []).forEach(d => {
+                        detailsMap[d.tag] = d;
+                    });
                     
-                    let best = null, bestScore = 0;
-                    for (const cand of candidates) {
-                        const cCand = cleanJsProbeStr(cand);
-                        if (!cCand) continue;
-                        for (const p of window.CACHED_PROBE_NODES) {
-                            const cName = cleanJsProbeStr(p.name || '');
-                            if (!cName) continue;
-                            let score = 0;
-                            if (cCand === cName) score = 0.95;
-                            else if (cCand.includes(cName) || cName.includes(cCand)) {
-                                score = 0.72 + 0.20 * (Math.min(cCand.length, cName.length) / Math.max(cCand.length, cName.length));
-                            }
-                            if (score > bestScore) {
-                                bestScore = score;
-                                best = p;
-                            }
+                    items.forEach(item => {
+                        const tagInput = item.querySelector('input[name="sub_tags[]"]');
+                        const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
+                        const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+                        const tag = tagInput ? tagInput.value.trim() : '';
+                        
+                        if (detailsMap[tag]) {
+                            const matchInfo = detailsMap[tag];
+                            if (probeInput) probeInput.value = matchInfo.matched;
+                            if (quotaInput && matchInfo.quota_gb > 0) quotaInput.value = matchInfo.quota_gb;
+                            updateRowProbeBadge(item, matchInfo.matched, matchInfo.quota_gb);
                         }
-                    }
-                    if (best && bestScore >= 0.70) {
-                        probeInput.value = best.name;
-                        if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
-                            quotaInput.value = best.limit_gb;
-                        }
-                        matchedCount++;
+                    });
+                    
+                    showToast(`⚡ 匹配成功！已成功匹配 ${res.matched_count} 个订阅节点与真实流量配额！`, '🎉');
+                } else {
+                    // 降级为前端本地缓存匹配
+                    localBatchMatch(items);
+                }
+            })
+            .catch(() => {
+                localBatchMatch(items);
+            });
+    }
+
+    function localBatchMatch(items) {
+        if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
+            showToast('未探测到探针节点，请先保存探针配置', '⚠️');
+            return;
+        }
+        let matchedCount = 0;
+        items.forEach(item => {
+            const tagInput = item.querySelector('input[name="sub_tags[]"]');
+            const probeInput = item.querySelector('input[name="sub_probe_ids[]"]');
+            const quotaInput = item.querySelector('input[name="sub_quotas[]"]');
+            const urlTextarea = item.querySelector('textarea[name="sub_urls[]"]');
+            
+            const tagName = tagInput ? tagInput.value.trim() : '';
+            const rawContent = urlTextarea ? urlTextarea.value.trim() : '';
+            let candidates = [];
+            if (tagName) candidates.push(tagName);
+            if (rawContent) {
+                const hashMatches = rawContent.match(/#([^&\r\n]+)/g);
+                if (hashMatches) hashMatches.forEach(m => {
+                    try { candidates.push(decodeURIComponent(m.substring(1))); } catch(e){ candidates.push(m.substring(1)); }
+                });
+            }
+            
+            let best = null, bestScore = 0;
+            for (const cand of candidates) {
+                if (!cand) continue;
+                for (const p of window.CACHED_PROBE_NODES) {
+                    const score = scoreJsProbeMatch(cand, p);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = p;
                     }
                 }
-            });
-            if (matchedCount > 0) {
-                showToast(`一键智能匹配完成：已成功匹配 ${matchedCount} 个订阅节点与总流量！`, '🎉');
-            } else {
-                showToast('已扫描完成，所有节点均已匹配或无未匹配项', '💡');
             }
-        };
-
-        if (!window.CACHED_PROBE_NODES || !window.CACHED_PROBE_NODES.length) {
-            fetch('/api/probe_nodes')
-                .then(r => r.json())
-                .then(list => {
-                    window.CACHED_PROBE_NODES = list || [];
-                    doBatch();
-                })
-                .catch(() => showToast('无法读取探针节点，请先保存探针地址并同步', '⚠️'));
-        } else {
-            doBatch();
-        }
+            if (best && bestScore >= 0.65) {
+                if (probeInput) probeInput.value = best.name;
+                if (quotaInput && (!quotaInput.value.trim() || quotaInput.value.trim() === '0') && best.limit_gb) {
+                    quotaInput.value = best.limit_gb;
+                }
+                updateRowProbeBadge(item, best.name, best.limit_gb);
+                matchedCount++;
+            }
+        });
+        showToast(`智能匹配完成：已关联 ${matchedCount} 个探针节点！`, '🎉');
     }
 
     function addSub() {
@@ -1610,7 +1761,11 @@
             <div class="sub-header" onclick="toggleBody(this)">
                 <div class="sub-handle" onclick="event.stopPropagation()">☰</div>
                 <input name="sub_tags[]" class="sub-name-input" placeholder="新订阅源名称" oninput="autoMatchProbe(this)" onchange="autoMatchProbe(this)" onclick="event.stopPropagation()">
+                <div class="probe-header-status" onclick="event.stopPropagation(); triggerRowAutoMatch(this);" title="点击为此节点自动匹配探针">
+                    <span class="probe-pill-unmatched">⚡ 自动匹配探针</span>
+                </div>
                 <div class="actions" onclick="event.stopPropagation()" style="display: flex; gap: 4px; align-items: center;">
+                    <button type="button" class="btn-icon" onclick="triggerRowAutoMatch(this)" title="智能匹配探针与配额" style="color: #6366f1; font-weight: bold; font-size: 0.95rem;">⚡</button>
                     <button type="button" class="btn-icon" onclick="moveTop(this)">⬆️</button>
                     <button type="button" class="btn-icon" onclick="moveBottom(this)">⬇️</button>
                     <button type="button" class="btn-icon" onclick="toggleBody(this.closest('.sub-header'))">✏️</button>

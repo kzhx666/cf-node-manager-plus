@@ -15,7 +15,7 @@ WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin")
 LOGIN_PATH = "admin_login"
 DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data" if os.path.exists("/app/data") else DEFAULT_DATA_DIR)
-APP_VERSION = "v43.10-komari-nezha-pro"
+APP_VERSION = "v43.20-komari-nezha-automatch"
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 BACKUP_FILE = os.path.join(DATA_DIR, "data.json.bak")
 CACHE_FILE = os.path.join(DATA_DIR, "domain_cache.json")
@@ -654,6 +654,23 @@ async def fetch_nezha_stats(session, nezha_url, nezha_token=""):
             pass
     return servers_map
 
+# 中文数字与探针规整化字典
+CN_NUMS_MAP = {
+    '零': '0', '一': '1', '二': '2', '两': '2', '三': '3', '四': '4',
+    '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10'
+}
+
+PROBE_STRIP_SUFFIXES = [
+    '本机', '优选', '中转', '直连', '备用', '节点', '专线', '测试', '自建', '落地',
+    '电信', '联通', '移动', 'bgp', 'gia', 'cmi', 'ipv4', 'ipv6', 'v4', 'v6'
+]
+
+PROBE_SPEC_PATTERNS = [
+    r'\d+c\d+g', r'\d+c', r'\d+g', '玩具', '家宽', '无限流量', '优化', '原生', '动态', '静态'
+]
+
+PROBE_COUNTRIES = ['美国', '香港', '日本', '新加坡', '德国', '英国', '韩国', '台湾', '荷兰', '法国', '加拿大', '澳大利亚', '俄罗斯', '芬兰']
+
 def clean_probe_text(s):
     """规整化探针节点匹配文本：去除Emoji、特殊字符与空格并转小写"""
     if not s: return ""
@@ -661,10 +678,58 @@ def clean_probe_text(s):
     s = re.sub(r'[\U0001F300-\U0001FAFF]', '', s)
     s = re.sub(r'[\u2600-\u27BF]', '', s)
     s = s.lower().strip()
+    for cn, num in CN_NUMS_MAP.items():
+        s = s.replace(cn, num)
+    s = re.sub(r'([a-z]+)o(\d+)', r'\g<1>0\2', s)
+    s = re.sub(r'(\d+)o([a-z]+)', r'\g<1>0\2', s)
     return re.sub(r'[\s\-_\.:\/\[\]\(\)\{\}\*#@!+=~`|\^]+', '', s)
 
+def extract_probe_core_features(s):
+    """提取核心名称特征（去除本机/优选后缀、去除配置规格标识符）"""
+    norm = clean_probe_text(s)
+    if not norm: return "", ""
+    
+    # 剥离尾部节点功能词（如 本机、优选 等）
+    changed = True
+    while changed:
+        changed = False
+        for suf in PROBE_STRIP_SUFFIXES:
+            if norm.endswith(suf) and len(norm) > len(suf) + 1:
+                norm = norm[:-len(suf)]
+                changed = True
+                
+    # 剥离 VPS 规格词（如 8c8g, 玩具, 家宽 等）
+    core = norm
+    for sp in PROBE_SPEC_PATTERNS:
+        core = re.sub(sp, '', core)
+    core = re.sub(r'[\s\-_\.:]+', '', core)
+    
+    return norm, core if len(core) >= 2 else norm
+
+def check_probe_prefix_conflict(s1, s2):
+    """防止跨商家误匹配：若包含相同国家词，但国家词前的商家品牌相似度极低，则判定冲突"""
+    for c in PROBE_COUNTRIES:
+        if c in s1 and c in s2:
+            p1 = s1.split(c)[0]
+            p2 = s2.split(c)[0]
+            if p1 and p2 and p1 != p2:
+                import difflib
+                sim_p = difflib.SequenceMatcher(None, p1, p2).ratio()
+                if sim_p < 0.6:
+                    return True # 商家冲突
+    return False
+
 def score_probe_match(candidate, probe_entry):
-    """计算候选字符串与探针节点的容错匹配度得分 (0.0 ~ 1.0)"""
+    """
+    计算候选字符串与探针节点的容错匹配度得分 (0.0 ~ 1.0)
+    支持：
+    1. 自动剥离 [本机]、[优选]、[直连] 等功能后缀
+    2. 中文数字自动转换为阿拉伯数字（如 '三区' 匹配 '3区'）
+    3. 忽略大小写、国旗Emoji、空格标点符号
+    4. 字母O与数字0自动容错（如 'RNO2' 匹配 'RN02'）
+    5. 核心品牌地域提取（如 '无聊云德国玩具' 匹配 '无聊云德国8C8G'）
+    6. 智能品牌前缀防串防误匹配
+    """
     if not candidate or not probe_entry: return 0.0
     cand_raw = str(candidate).strip()
     cand_lower = cand_raw.lower()
@@ -674,44 +739,53 @@ def score_probe_match(candidate, probe_entry):
     node_id = str(probe_entry.get('id', '')).strip().lower()
     
     # 1. 绝对精确匹配 (UUID 或 ID)
-    if node_uuid and cand_lower == node_uuid:
-        return 1.0
-    if node_id and cand_lower == node_id:
-        return 1.0
+    if node_uuid and cand_lower == node_uuid: return 1.0
+    if node_id and cand_lower == node_id: return 1.0
+    if node_name and cand_raw == node_name: return 1.0
+    if node_name and cand_lower == node_name.lower(): return 0.98
         
-    # 2. 名称完全精确匹配
-    if node_name and cand_raw == node_name:
-        return 1.0
-    if node_name and cand_lower == node_name.lower():
-        return 0.98
-        
-    # 3. 容错规整化匹配 (忽略大小写、空格、标点符号与国旗Emoji)
-    c_clean = clean_probe_text(cand_raw)
-    n_clean = clean_probe_text(node_name)
+    c_norm, c_core = extract_probe_core_features(cand_raw)
+    n_norm, n_core = extract_probe_core_features(node_name)
     
-    if not c_clean or not n_clean:
+    if not c_norm or not n_norm: return 0.0
+    
+    # 品牌商家冲突检查（避免因同为'美国'而将 'rn02美国' 误匹配至 'dr美国'）
+    if check_probe_prefix_conflict(c_norm, n_norm):
         return 0.0
         
-    if c_clean == n_clean:
-        return 0.95
+    # 2. 剥离本机/优选后缀与规整后完全相等
+    if c_norm == n_norm:
+        return 0.96
         
-    # 4. 子串包含容错匹配 (例如 "Tokyo01" in "Tokyo01-BGP" 或 "甲骨文首尔" in "首尔")
-    if c_clean in n_clean or n_clean in c_clean:
-        shorter = min(len(c_clean), len(n_clean))
-        longer = max(len(c_clean), len(n_clean))
+    # 3. 核心词完全相等（核心品牌+国家一致，如 无聊云德国玩具 vs 无聊云德国8C8G）
+    if c_core and n_core and c_core == n_core and len(c_core) >= 3:
+        return 0.93
+        
+    # 4. 子串包含关系 (例如 "无聊云新加坡玩具" in "无聊云新加坡玩具本机")
+    if c_norm in n_norm or n_norm in c_norm:
+        shorter = min(len(c_norm), len(n_norm))
+        longer = max(len(c_norm), len(n_norm))
         if shorter >= 2:
-            ratio = shorter / longer
-            return 0.72 + 0.20 * ratio
+            return 0.75 + 0.20 * (shorter / longer)
             
-    # 5. 字符序列相似度容错 (difflib SequenceMatcher)
+    # 5. 核心词包含关系
+    if c_core and n_core and (c_core in n_core or n_core in c_core):
+        shorter = min(len(c_core), len(n_core))
+        longer = max(len(c_core), len(n_core))
+        if shorter >= 3:
+            return 0.70 + 0.20 * (shorter / longer)
+            
+    # 6. 字符序列相似度容错 (difflib SequenceMatcher)
     import difflib
-    sim = difflib.SequenceMatcher(None, c_clean, n_clean).ratio()
-    if sim >= 0.60:
-        return 0.60 + 0.32 * sim
+    sim1 = difflib.SequenceMatcher(None, c_norm, n_norm).ratio()
+    sim2 = difflib.SequenceMatcher(None, c_core, n_core).ratio() if c_core and n_core else 0
+    sim = max(sim1, sim2)
+    if sim >= 0.58:
+        return 0.55 + 0.35 * sim
         
     return 0.0
 
-def find_best_probe_node(candidates, probe_servers, min_threshold=0.68):
+def find_best_probe_node(candidates, probe_servers, min_threshold=0.65):
     """
     在一组候选文本（用户指定ID、订阅分组名、节点名等）中，
     对所有探针节点计算容错匹配度，返回最佳匹配的探针节点 entry, 得分, 以及命中的候选词
@@ -1660,7 +1734,7 @@ async def async_process_subs():
                         for dn in direct_nodes[:6]:
                             if dn.get('name'): auto_cands.append(dn.get('name'))
                         
-                        matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.68)
+                        matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.65)
                         if matched_probe:
                             auto_matched = True
                             matched_name = matched_probe.get('name') or matched_probe.get('uuid') or ''
@@ -2028,7 +2102,122 @@ def api_nodes():
 @app.route('/api/probe_nodes', methods=['GET'])
 def api_probe_nodes():
     d = load_data()
-    return jsonify(d.get('cached_probe_nodes', []))
+    cached = d.get('cached_probe_nodes', [])
+    force_refresh = request.args.get('refresh') == '1'
+    if (not cached or force_refresh) and aiohttp:
+        cfg = d.get('config', {})
+        probe_type = str(cfg.get('probe_type', 'komari')).lower()
+        probe_url = (cfg.get('probe_url') or cfg.get('nezha_url', '')).strip()
+        probe_token = (cfg.get('probe_token') or cfg.get('nezha_token', '')).strip()
+        if probe_url:
+            try:
+                async def _fetch():
+                    async with aiohttp.ClientSession() as ps_session:
+                        if probe_type == 'komari':
+                            return await fetch_komari_stats(ps_session, probe_url, probe_token)
+                        else:
+                            return await fetch_nezha_stats(ps_session, probe_url, probe_token)
+                res = asyncio.run(_fetch())
+                if res:
+                    unique_nodes_list = []
+                    seen_nodes = set()
+                    for v in res.values():
+                        if isinstance(v, dict):
+                            k = v.get('uuid') or v.get('id') or v.get('name')
+                            if k and k not in seen_nodes:
+                                seen_nodes.add(k)
+                                unique_nodes_list.append({
+                                    "uuid": str(v.get('uuid', '')),
+                                    "id": str(v.get('id', '')),
+                                    "name": str(v.get('name', '')),
+                                    "used": v.get('used', 0),
+                                    "limit": v.get('limit', 0),
+                                    "limit_gb": v.get('limit_gb', 0)
+                                })
+                    d['cached_probe_nodes'] = unique_nodes_list
+                    save_data(d)
+                    return jsonify(unique_nodes_list)
+            except Exception as e:
+                write_log(f"API Probe Nodes Fetch Error: {e}")
+    return jsonify(cached)
+
+@app.route('/api/auto_match_all', methods=['POST'])
+def api_auto_match_all():
+    """一键智能容错匹配所有订阅源对应的探针节点及总配额，并持久化保存至 data.json"""
+    d = load_data()
+    subs = d.get('remote_subs', [])
+    cfg = d.get('config', {})
+    probe_type = str(cfg.get('probe_type', 'komari')).lower()
+    probe_url = (cfg.get('probe_url') or cfg.get('nezha_url', '')).strip()
+    probe_token = (cfg.get('probe_token') or cfg.get('nezha_token', '')).strip()
+    
+    probe_servers = {}
+    if probe_url and aiohttp:
+        try:
+            async def _fetch():
+                async with aiohttp.ClientSession() as ps_session:
+                    if probe_type == 'komari':
+                        return await fetch_komari_stats(ps_session, probe_url, probe_token)
+                    else:
+                        return await fetch_nezha_stats(ps_session, probe_url, probe_token)
+            probe_servers = asyncio.run(_fetch())
+        except Exception as e:
+            write_log(f"Auto Match All Fetch Error: {e}")
+            
+    if not probe_servers and d.get('cached_probe_nodes'):
+        for pn in d['cached_probe_nodes']:
+            probe_servers[pn.get('name', '')] = pn
+            if pn.get('uuid'): probe_servers[pn['uuid']] = pn
+
+    if not probe_servers:
+        return jsonify({"status": "error", "message": "未连接到探针或未配置探针地址，请在高级参数中检查探针配置"})
+        
+    matched_count = 0
+    match_details = []
+    
+    for sub in subs:
+        tag = sub.get('tag', '')
+        raw_text = sub.get('url', '')
+        current_probe = str(sub.get('probe_id') or sub.get('nezha_id', '')).strip()
+        current_quota = 0
+        try: current_quota = float(sub.get('quota_gb', 0) or 0)
+        except: current_quota = 0
+        
+        cands = []
+        if current_probe: cands.append(current_probe)
+        if tag: cands.append(tag)
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if '#' in line:
+                m_part = line.split('#')[-1].split('&')[0].strip()
+                if m_part: cands.append(m_part)
+                
+        best_e, score, mc = find_best_probe_node(cands, probe_servers, min_threshold=0.65)
+        if best_e:
+            matched_name = best_e.get('name') or best_e.get('uuid') or ''
+            sub['probe_id'] = matched_name
+            sub['nezha_id'] = matched_name
+            
+            p_limit_gb = best_e.get('limit_gb', 0)
+            if (current_quota <= 0) and p_limit_gb > 0:
+                sub['quota_gb'] = p_limit_gb
+                
+            matched_count += 1
+            match_details.append({
+                "tag": tag,
+                "matched": matched_name,
+                "quota_gb": sub.get('quota_gb', 0),
+                "score": round(score, 3)
+            })
+            
+    d['remote_subs'] = subs
+    save_data(d)
+    return jsonify({
+        "status": "ok",
+        "matched_count": matched_count,
+        "details": match_details,
+        "subs": subs
+    })
 
 @app.route('/api/node_delete', methods=['POST'])
 def api_node_delete():
