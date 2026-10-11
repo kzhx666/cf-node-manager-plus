@@ -564,7 +564,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
         node_info_map = {}
         # 1.1 获取节点列表（提取 UUID、节点名称 Name 与 traffic_limit 总流量限制）
         nodes_req = {"jsonrpc": "2.0", "method": "common:getNodes", "params": {}, "id": 1}
-        async with session.post(rpc_url, json=nodes_req, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+        async with session.post(rpc_url, json=nodes_req, headers=headers, timeout=aiohttp.ClientTimeout(total=15), ssl=False) as r:
             if r.status == 200:
                 res = await r.json()
                 data = res.get('result') or {}
@@ -591,7 +591,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
 
         # 1.2 获取节点最新流量状态（提取 net_total_up 与 net_total_down）
         status_req = {"jsonrpc": "2.0", "method": "common:getNodesLatestStatus", "params": {}, "id": 2}
-        async with session.post(rpc_url, json=status_req, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+        async with session.post(rpc_url, json=status_req, headers=headers, timeout=aiohttp.ClientTimeout(total=15), ssl=False) as r:
             if r.status == 200:
                 res = await r.json()
                 stat_data = res.get('result') or {}
@@ -627,7 +627,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
     if not servers_map:
         try:
             nodes_url = f"{komari_url}/api/nodes"
-            async with session.get(nodes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=6), ssl=False) as r:
+            async with session.get(nodes_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15), ssl=False) as r:
                 if r.status == 200:
                     data = await r.json()
                     nodes_list = data.get('data') or []
@@ -645,7 +645,7 @@ async def fetch_komari_stats(session, komari_url, api_key=""):
                             used = 0
                             try:
                                 recent_url = f"{komari_url}/api/recent/{uid}"
-                                async with session.get(recent_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4), ssl=False) as rr:
+                                async with session.get(recent_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8), ssl=False) as rr:
                                     if rr.status == 200:
                                         r_data = await rr.json()
                                         recs = r_data.get('data') or []
@@ -680,7 +680,7 @@ async def fetch_nezha_stats(session, nezha_url, nezha_token=""):
     servers_map = {}
     for ep in endpoints:
         try:
-            async with session.get(ep, headers=headers, timeout=aiohttp.ClientTimeout(total=8), ssl=False) as r:
+            async with session.get(ep, headers=headers, timeout=aiohttp.ClientTimeout(total=15), ssl=False) as r:
                 if r.status == 200:
                     data = await r.json()
                     raw_list = []
@@ -724,7 +724,8 @@ CN_NUMS_MAP = {
 
 PROBE_STRIP_SUFFIXES = [
     '本机', '优选', '中转', '直连', '备用', '节点', '专线', '测试', '自建', '落地',
-    '电信', '联通', '移动', 'bgp', 'gia', 'cmi', 'ipv4', 'ipv6', 'v4', 'v6'
+    '电信', '联通', '移动', 'bgp', 'gia', 'cmi', 'ipv4', 'ipv6', 'v4', 'v6',
+    'argo', 'cf', 'tunnel', '隧道', 'tg', 'bot'
 ]
 
 PROBE_SPEC_PATTERNS = [
@@ -1734,6 +1735,20 @@ async def async_process_subs():
                 except Exception as e:
                     write_log(f"Probe Sync Error ({probe_type}): {e}")
 
+            # 🌟 关键降级保障：若实时拉取探针失败（网络抖动或临时超时），自动读取历史 cached_probe_nodes 缓存
+            if not probe_servers and d.get('cached_probe_nodes'):
+                write_log(f"Probe live fetch empty/failed ({probe_type}), falling back to cached_probe_nodes ({len(d['cached_probe_nodes'])} nodes)")
+                for pn in d['cached_probe_nodes']:
+                    if isinstance(pn, dict):
+                        k_name = str(pn.get('name', '')).strip()
+                        k_uuid = str(pn.get('uuid', '')).strip().lower()
+                        k_id = str(pn.get('id', '')).strip().lower()
+                        if k_name:
+                            probe_servers[k_name.lower()] = pn
+                            probe_servers[k_name] = pn
+                        if k_uuid: probe_servers[k_uuid] = pn
+                        if k_id: probe_servers[k_id] = pn
+
             if probe_servers:
                 unique_nodes_list = []
                 seen_nodes = set()
@@ -1764,6 +1779,7 @@ async def async_process_subs():
                 try: quota_gb = float(sub_item.get('quota_gb', 0) or 0)
                 except: quota_gb = 0
                 probe_id = str(sub_item.get('probe_id') or sub_item.get('nezha_id', '')).strip()
+                old_info = sub_item.get('info')
                 
                 lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
                 http_links = []; direct_nodes = []; raw_content_parts = []
@@ -1809,9 +1825,17 @@ async def async_process_subs():
                     # 2. 如果用户未手动填写，或手动填写未匹配，执行自动智能容错匹配
                     if not matched_probe:
                         auto_cands = []
-                        if tag: auto_cands.append(tag)
+                        if tag:
+                            auto_cands.append(tag)
+                            stripped_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
+                            if stripped_argo and stripped_argo != tag:
+                                auto_cands.append(stripped_argo)
                         for dn in direct_nodes[:6]:
-                            if dn.get('name'): auto_cands.append(dn.get('name'))
+                            if dn.get('name'):
+                                auto_cands.append(dn.get('name'))
+                                dn_no_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', dn.get('name'), flags=re.IGNORECASE).strip()
+                                if dn_no_argo and dn_no_argo != dn.get('name'):
+                                    auto_cands.append(dn_no_argo)
                         
                         matched_probe, score, mc = find_best_probe_node(auto_cands, probe_servers, min_threshold=0.65)
                         if matched_probe:
@@ -1861,10 +1885,21 @@ async def async_process_subs():
                         fetched_info['has_total'] = True
                         fetched_info['color'] = "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981")
                     sub_item['info'] = fetched_info
+                elif old_info and isinstance(old_info, dict) and old_info.get('used_bytes', 0) > 0 and old_info.get('used') != 'VPS':
+                    # 🌟 关键数据保护：若本次探针连接暂时未响应或解析中，但历史已有真实探针流量数据，保留历史真实数据，绝不抹除为 VPS！
+                    if quota_gb > 0:
+                        real_t = int(quota_gb * 1073741824)
+                        used_b = old_info.get('used_bytes', 0)
+                        pct = min(100, int((used_b / real_t) * 100)) if real_t > 0 else 0
+                        old_info['total'] = format_bytes_smart(real_t)
+                        old_info['total_bytes'] = real_t
+                        old_info['percent'] = pct
+                        old_info['has_total'] = True
+                    sub_item['info'] = old_info
                 elif quota_gb > 0:
-                    # 纯自建 VPS 用户配置了总配额，无探针且无 HTTP 订阅
+                    # 纯自建 VPS 用户配置了总配额，无探针且无 HTTP 订阅且无历史真实数据
                     sub_item['info'] = {
-                        "used": "VPS",
+                        "used": "0B",
                         "used_bytes": 0,
                         "total": f"{quota_gb:.0f}GB",
                         "total_bytes": int(quota_gb * 1073741824),
@@ -1913,12 +1948,16 @@ async def async_process_subs():
                 latest_subs = latest_d.get('remote_subs', [])
                 sub_info_map = {s.get('tag', ''): s.get('info') for s in subs if s.get('tag')}
                 sub_quota_map = {s.get('tag', ''): s.get('quota_gb') for s in subs if s.get('tag')}
+                sub_probe_map = {s.get('tag', ''): (s.get('probe_id') or s.get('nezha_id')) for s in subs if s.get('tag') and (s.get('probe_id') or s.get('nezha_id'))}
                 for ls in latest_subs:
                     ltag = ls.get('tag', '')
                     if ltag in sub_info_map and sub_info_map[ltag] is not None:
                         ls['info'] = sub_info_map[ltag]
                     if ltag in sub_quota_map and sub_quota_map[ltag]:
                         ls['quota_gb'] = sub_quota_map[ltag]
+                    if ltag in sub_probe_map and sub_probe_map[ltag] and not (ls.get('probe_id') or ls.get('nezha_id')):
+                        ls['probe_id'] = sub_probe_map[ltag]
+                        ls['nezha_id'] = sub_probe_map[ltag]
                 
                 latest_d['remote_subs'] = latest_subs
                 latest_d['cached_nodes'] = valid_nodes
@@ -2247,6 +2286,19 @@ def api_push_nodes():
                 "nezha_id": "",
                 "info": None
             }
+            # 如果是 Argo 独立订阅，自动尝试继承同 VPS 主订阅已有的探针与配额
+            if is_argo:
+                base_tag = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
+                for s in (items_to_insert + subs):
+                    if s.get('tag', '').strip() == base_tag or s.get('tag', '').strip().lower() == base_tag.lower():
+                        if s.get('probe_id'):
+                            new_sub['probe_id'] = s.get('probe_id')
+                            new_sub['nezha_id'] = s.get('probe_id')
+                        if s.get('quota_gb'):
+                            new_sub['quota_gb'] = s.get('quota_gb')
+                        if s.get('info') and isinstance(s.get('info'), dict) and s.get('info').get('used') != 'VPS':
+                            new_sub['info'] = copy.deepcopy(s.get('info'))
+                        break
             items_to_insert.append(new_sub)
             
         processed_tags.append(tag)
@@ -2397,12 +2449,20 @@ def api_auto_match_all():
         
         cands = []
         if current_probe: cands.append(current_probe)
-        if tag: cands.append(tag)
+        if tag:
+            cands.append(tag)
+            stripped_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
+            if stripped_argo and stripped_argo != tag:
+                cands.append(stripped_argo)
         for line in raw_text.splitlines():
             line = line.strip()
             if '#' in line:
                 m_part = line.split('#')[-1].split('&')[0].strip()
-                if m_part: cands.append(m_part)
+                if m_part:
+                    cands.append(m_part)
+                    m_no_argo = re.sub(r'[\-_\s]*argo[\-_\s]*', '', m_part, flags=re.IGNORECASE).strip()
+                    if m_no_argo and m_no_argo != m_part:
+                        cands.append(m_no_argo)
                 
         best_e, score, mc = find_best_probe_node(cands, probe_servers, min_threshold=0.65)
         if best_e:
@@ -2413,6 +2473,26 @@ def api_auto_match_all():
             p_limit_gb = best_e.get('limit_gb', 0)
             if (current_quota <= 0) and p_limit_gb > 0:
                 sub['quota_gb'] = p_limit_gb
+                current_quota = p_limit_gb
+
+            # 🌟 立即更新该订阅的分组流量胶囊与进度条
+            used_bytes = int(best_e.get('used', 0))
+            limit_bytes = int(best_e.get('limit', 0))
+            real_t = int(current_quota * 1073741824) if current_quota > 0 else (limit_bytes if limit_bytes > 0 else 0)
+            pct = min(100, int((used_bytes / real_t) * 100)) if real_t > 0 else 0
+            sub['info'] = {
+                "used": format_bytes_smart(used_bytes),
+                "used_bytes": used_bytes,
+                "total": format_bytes_smart(real_t) if real_t > 0 else "",
+                "total_bytes": real_t,
+                "percent": pct,
+                "has_total": real_t > 0,
+                "expire": "",
+                "color": "#dc3545" if pct >= 90 else ("#f59e0b" if pct >= 75 else "#10b981"),
+                "source": probe_type,
+                "matched_probe": matched_name,
+                "auto_matched": True
+            }
                 
             matched_count += 1
             match_details.append({
@@ -2424,6 +2504,7 @@ def api_auto_match_all():
             
     d['remote_subs'] = subs
     save_data(d)
+    threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
     return jsonify({
         "status": "ok",
         "matched_count": matched_count,

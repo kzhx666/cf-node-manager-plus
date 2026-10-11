@@ -2447,7 +2447,10 @@
                         }
                     });
                     
-                    showToast(`⚡ 匹配成功！已为 ${res.matched_count} 个订阅节点关联探针与总配额！`, '🎉');
+                    showToast(`⚡ 匹配成功！已为 ${res.matched_count} 个订阅节点关联探针与总配额！正在更新流量胶囊...`, '🎉');
+                    if (!formIsDirty) {
+                        setTimeout(() => { location.reload(); }, 1200);
+                    }
                 } else {
                     localBatchMatch(items);
                 }
