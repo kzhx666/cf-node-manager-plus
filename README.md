@@ -124,6 +124,37 @@ docker compose ps
 
 ---
 
+## 节点自动推送 API `/api/push_nodes`
+
+支持外部脚本（如 `sb-install-plus` 节点安装脚本）将生成的节点实时推送到本面板：
+
+### 请求方式
+- **方法**：`POST`
+- **路径**：`/api/push_nodes`
+- **鉴权方式**（支持以下任一种）：
+  - Header: `Authorization: Bearer <WEB_PASSWORD 或 sub_token>`
+  - Header: `X-API-Key: <WEB_PASSWORD 或 sub_token>`
+  - URL Query: `?token=<WEB_PASSWORD 或 sub_token>`
+  - JSON Body: `"token": "<WEB_PASSWORD 或 sub_token>"`
+
+### 请求体 (JSON)
+```json
+{
+  "tag": "My-VPS-HK",
+  "nodes": "vless://...\nhysteria2://...\ntuic://...",
+  "replace": true,
+  "sync": true
+}
+```
+
+### 字段说明
+- `tag`（必填）：订阅源名称，面板中将以此名称展示该分组。
+- `nodes`（必填）：节点链接内容，支持多行文本或链接数组。
+- `replace`（可选，默认 `true`）：如果已存在同名订阅源，则全量更新替换；设为 `false` 则追加。
+- `sync`（可选，默认 `true`）：推送后是否立即触发后台节点同步与地区旗帜识别。
+
+---
+
 ## 支持的节点类型（简表）
 
 > 具体能输出哪些格式，取决于目标客户端是否支持该类型。

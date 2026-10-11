@@ -208,7 +208,46 @@ def get_current_password():
 
 def is_authenticated():
     expected_pwd = get_current_password()
-    return request.cookies.get('auth') == expected_pwd
+    d = load_data()
+    sub_token = d.get('config', {}).get('sub_token') or expected_pwd
+    valid_keys = {k for k in [expected_pwd, sub_token, WEB_PASSWORD] if k}
+    
+    # 1. Cookie 鉴权
+    cookie_auth = request.cookies.get('auth')
+    if cookie_auth and cookie_auth in valid_keys:
+        return True
+        
+    # 2. Authorization Header (Bearer <token> 或直接 <token>)
+    auth_header = request.headers.get('Authorization', '').strip()
+    if auth_header:
+        token = auth_header[7:].strip() if auth_header.lower().startswith('bearer ') else auth_header
+        if token and token in valid_keys:
+            return True
+
+    # 3. 自定义 Header
+    custom_key = request.headers.get('X-API-Key', '').strip() or request.headers.get('X-Token', '').strip()
+    if custom_key and custom_key in valid_keys:
+        return True
+
+    # 4. URL Query 参数 (?token=... 或 ?password=...)
+    query_token = (request.args.get('token') or request.args.get('password') or '').strip()
+    if query_token and query_token in valid_keys:
+        return True
+
+    # 5. POST JSON / Form 中的 token
+    if request.is_json:
+        try:
+            req_data = request.get_json(silent=True) or {}
+            body_token = str(req_data.get('token') or req_data.get('password') or '').strip()
+            if body_token and body_token in valid_keys:
+                return True
+        except: pass
+    elif request.form:
+        form_token = (request.form.get('token') or request.form.get('password') or '').strip()
+        if form_token and form_token in valid_keys:
+            return True
+
+    return False
 
 def split_host_port(target_str, default_port=None):
     if not target_str:
@@ -2088,6 +2127,84 @@ def api_parse_csv_ips():
         return jsonify({"status": "success", "count": len(ips), "ips": d['ips']})
     except Exception as e:
         return jsonify({"status": "error", "msg": str(e)})
+
+@app.route('/api/push_nodes', methods=['POST'])
+def api_push_nodes():
+    if not is_authenticated():
+        return jsonify({"status": "error", "msg": "未授权访问，请提供正确的 Token 或密码"}), 401
+    
+    data_payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+    if not data_payload:
+        data_payload = {}
+    
+    tag = str(data_payload.get('tag', '')).strip()
+    raw_nodes = data_payload.get('nodes', '')
+    replace = data_payload.get('replace', True)
+    if isinstance(replace, str):
+        replace = replace.lower() not in ('false', '0', 'no')
+    trigger_sync = data_payload.get('sync', True)
+    if isinstance(trigger_sync, str):
+        trigger_sync = trigger_sync.lower() not in ('false', '0', 'no')
+
+    # 支持 nodes 为字符串（换行分隔）或列表（数组）
+    if isinstance(raw_nodes, list):
+        nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
+        nodes_str = "\n".join(nodes_list)
+    else:
+        nodes_str = str(raw_nodes).strip()
+        nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
+
+    if not tag:
+        return jsonify({"status": "error", "msg": "缺少必要参数: tag (订阅源名称)"}), 400
+    if not nodes_str:
+        return jsonify({"status": "error", "msg": "缺少必要参数: nodes (节点链接内容)"}), 400
+
+    d = load_data()
+    subs = d.get('remote_subs', [])
+    
+    found_idx = -1
+    for idx, s in enumerate(subs):
+        if s.get('tag', '').strip() == tag:
+            found_idx = idx
+            break
+            
+    if found_idx >= 0:
+        if replace:
+            subs[found_idx]['url'] = nodes_str
+            subs[found_idx]['enabled'] = True
+            action_desc = "更新现有订阅源"
+        else:
+            old_url = subs[found_idx].get('url', '').strip()
+            subs[found_idx]['url'] = f"{old_url}\n{nodes_str}".strip()
+            subs[found_idx]['enabled'] = True
+            action_desc = "追加节点到订阅源"
+    else:
+        new_sub = {
+            "url": nodes_str,
+            "tag": tag,
+            "enabled": True,
+            "quota_gb": 0,
+            "probe_id": "",
+            "nezha_id": "",
+            "info": None
+        }
+        subs.append(new_sub)
+        action_desc = "新建订阅源"
+
+    d['remote_subs'] = subs
+    save_data(d)
+    write_log(f"API Push: 成功{action_desc}【{tag}】，包含 {len(nodes_list)} 个节点")
+
+    if trigger_sync:
+        threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
+
+    return jsonify({
+        "status": "success",
+        "msg": f"成功{action_desc}【{tag}】",
+        "tag": tag,
+        "action": action_desc,
+        "nodes_count": len(nodes_list)
+    })
 
 @app.route('/api/sync_subs', methods=['POST'])
 def api_sync_subs():
