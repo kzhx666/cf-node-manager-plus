@@ -1467,6 +1467,8 @@ def gen_uri(n, ip=None, port=None, name=None):
         p = {'sni': n.get('sni', ''), 'alpn': n.get('alpn', 'h3')}
         if n.get('skip-cert-verify'):
             p['insecure'] = '1'
+            p['allowInsecure'] = '1'
+            p['allow_insecure'] = '1'
 
         # Port hopping support:
         # - If original was ?mport=..., keep mport in query for compatibility.
@@ -1494,7 +1496,10 @@ def gen_uri(n, ip=None, port=None, name=None):
         return f"hysteria2://{n.get('password','')}@{server}:{port_part}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'tuic':
         p = {'sni':n.get('sni',''), 'congestion_control':n.get('congestion_control','bbr'), 'alpn': n.get('alpn', 'h3')}
-        if n.get('skip-cert-verify'): p['allow_insecure']='1'
+        if n.get('skip-cert-verify'):
+            p['allow_insecure'] = '1'
+            p['allowInsecure'] = '1'
+            p['insecure'] = '1'
         return f"tuic://{n['uuid']}:{n['password']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'anytls':
         p = {}
@@ -2378,6 +2383,63 @@ def api_push_nodes():
     except Exception as e:
         write_log(f"API Push Fatal Error: {e}")
         return jsonify({"status": "error", "msg": f"推送异常: {str(e)}"}), 500
+
+@app.route('/api/delete_pushed_nodes', methods=['POST'])
+def api_delete_pushed_nodes():
+    try:
+        if not is_authenticated():
+            return jsonify({"status": "error", "msg": "未授权访问，请提供正确的 Token 或密码"}), 401
+
+        data_payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+        if not data_payload:
+            data_payload = {}
+
+        tags_to_delete = data_payload.get('tags')
+        if not isinstance(tags_to_delete, list):
+            single_tag = str(data_payload.get('tag', '')).strip()
+            tags_to_delete = [single_tag] if single_tag else []
+
+        tags_to_delete = [str(t).strip() for t in tags_to_delete if str(t).strip()]
+        if not tags_to_delete:
+            return jsonify({"status": "error", "msg": "缺少必要参数: tag 或 tags 列表"}), 400
+
+        d = load_data()
+        subs = d.get('remote_subs', [])
+        deleted_tags = []
+        new_subs = []
+        for s in subs:
+            s_tag = s.get('tag', '').strip()
+            if s_tag in tags_to_delete:
+                deleted_tags.append(s_tag)
+            else:
+                new_subs.append(s)
+
+        if deleted_tags:
+            d['remote_subs'] = new_subs
+            # 同步清理缓存节点中属于这些 tag 的节点
+            cached = d.get('cached_nodes', [])
+            d['cached_nodes'] = [n for n in cached if n.get('_tag', '').strip() not in deleted_tags]
+            save_data(d)
+            write_log(f"API Delete: 已成功注销并清理订阅源: {', '.join(deleted_tags)}")
+
+            trigger_sync = data_payload.get('sync', True)
+            if trigger_sync:
+                threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": False}).start()
+
+            return jsonify({
+                "status": "success",
+                "msg": f"成功删除订阅源及关联节点【{', '.join(deleted_tags)}】",
+                "deleted": deleted_tags
+            })
+        else:
+            return jsonify({
+                "status": "success",
+                "msg": "未找到匹配的订阅源，无需删除",
+                "deleted": []
+            })
+    except Exception as e:
+        write_log(f"API Delete Fatal Error: {e}")
+        return jsonify({"status": "error", "msg": f"删除异常: {str(e)}"}), 500
 
 @app.route('/api/sync_subs', methods=['POST'])
 def api_sync_subs():
