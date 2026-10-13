@@ -1983,7 +1983,11 @@ async def async_process_subs():
                     ports_fp = ''
                     if n.get('ports'): ports_fp = str(n.get('ports'))
                     elif n.get('server_ports'): ports_fp = ','.join([str(x) for x in n.get('server_ports')])
-                    fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('server')}|{n.get('port')}|{ports_fp}"
+                    path_fp = n.get('ws-path') or n.get('grpc-name') or ''
+                    host_fp = n.get('ws-host') or n.get('sni') or ''
+                    name_fp = n.get('name') or ''
+                    tag_fp = n.get('_tag') or ''
+                    fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('password','')}|{n.get('server')}|{n.get('port')}|{ports_fp}|{path_fp}|{host_fp}|{name_fp}|{tag_fp}"
                     if fp not in unique: unique[fp] = n
                 
                 for n in unique.values():
