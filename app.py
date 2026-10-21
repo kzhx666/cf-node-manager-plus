@@ -29,6 +29,53 @@ SUB_TOKEN_CHECK = True
 IP_SEPARATOR = "##### ⬇️ 自动获取 (请写在横线上面) ⬇️ #####"
 DEFAULT_IPS = "104.16.1.1\n172.67.1.1"
 
+DEFAULT_OPENCLASH_TPL = """port: 7890
+socks-port: 7891
+mixed-port: 7890
+mode: rule
+log-level: info
+allow-lan: true
+external-controller: 0.0.0.0:9090
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - 1.1.1.1
+    - 8.8.8.8
+proxies:
+#PLACEHOLDER#
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - ♻️ 自动优选
+      - 🎯 全球直连
+#PLACEHOLDER_NAMES#
+  - name: ♻️ 自动优选
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies:
+#PLACEHOLDER_NAMES#
+  - name: 🎯 全球直连
+    type: select
+    proxies:
+      - DIRECT
+  - name: 🐟 漏网之鱼
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - 🎯 全球直连
+rules:
+  - GEOIP,CN,🎯 全球直连
+  - MATCH,🐟 漏网之鱼
+"""
+
 DEFAULT_SINGBOX_TPL = json.dumps({
     "log": {"level": "info", "timestamp": True},
     "dns": {
@@ -2845,10 +2892,16 @@ def sub():
     filename = urllib.parse.quote(filename)
     
     headers = {}
-    if flag == 'clash':
+    if flag in ['clash', 'openclash', 'meta']:
         if not yaml: return "PyYAML missing", 500
         y_str = yaml.dump(final_list, allow_unicode=True, sort_keys=False)
-        tpl = d.get('clash_tpl', 'proxies:\n#PLACEHOLDER#')
+        format_mode = (request.args.get('format') or '').strip().lower()
+        tpl = d.get('clash_tpl', '').strip()
+        if format_mode == 'provider':
+            tpl = "proxies:\n#PLACEHOLDER#"
+        elif not tpl or tpl == "proxies:\n#PLACEHOLDER#":
+            tpl = DEFAULT_OPENCLASH_TPL
+
         if "#PLACEHOLDER#" not in tpl: tpl += "\nproxies:\n#PLACEHOLDER#"
         y_str_indented = "\n".join(["  " + l for l in y_str.splitlines()])
         names = "\n".join([f"      - {n['name']}" for n in final_list])

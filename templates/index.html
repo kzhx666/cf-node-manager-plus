@@ -1368,9 +1368,12 @@
                 <!-- Template Editors -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px;">
                     <div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom: 6px;">
-                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">Clash.Meta 配置模板</label>
-                            <button type="button" class="btn btn-ghost btn-sm" onclick="resetClashTpl()" style="padding:0 4px; font-size:0.75rem;">恢复默认</button>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px; flex-wrap:wrap; gap:4px;">
+                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">OpenClash / Clash 配置模板</label>
+                            <div style="display:flex; gap:6px;">
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="setOpenClashFullTpl()" style="padding:0 6px; font-size:0.75rem;">⚡ 完整分流模板</button>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="resetClashTpl()" style="padding:0 6px; font-size:0.75rem;">📦 纯节点集</button>
+                            </div>
                         </div>
                         <textarea name="clash_tpl" id="clash_tpl_area" rows="6" style="font-size:0.78rem;">{{ data.clash_tpl }}</textarea>
                     </div>
@@ -1463,19 +1466,20 @@
                     </div>
                 </div>
 
-                <!-- Clash.Meta / Mihomo Card -->
+                <!-- OpenClash / Clash.Meta / Mihomo Card -->
                 <div class="export-card clash">
                     <div class="export-card-header">
                         <div class="export-title" style="color: var(--primary);">
-                            <span>⚡ Clash.Meta / Mihomo 订阅</span>
-                            <span class="export-badge">支持 Hy2 端口跳跃 / NaiveProxy</span>
+                            <span>⚡ OpenClash / Clash.Meta / Mihomo 订阅</span>
+                            <span class="export-badge">已原生适配 xHTTP(H3/UDP) / Reality / Hy2 / TUIC</span>
                         </div>
                     </div>
                     <div class="export-input-row">
                         <input id="link-clash" class="export-input" readonly onclick="copy(this)">
                     </div>
                     <div class="export-btn-group">
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="copy(document.getElementById('link-clash'))">📋 复制链接</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="copy(document.getElementById('link-clash'))">📋 复制 OpenClash 订阅</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="copyClashProvider()">📦 复制 Provider 纯节点</button>
                         <button type="button" class="btn btn-ghost btn-sm" onclick="qr(document.getElementById('link-clash').value)">📱 手机扫码</button>
                         <a id="btn-import-clash" href="#" class="btn btn-primary btn-sm">🚀 一键导入 Clash / Verge</a>
                     </div>
@@ -3087,11 +3091,75 @@
         }).catch(() => {});
     }, 1000);
 
-    function resetClashTpl() {
-        if (confirm("确定重置为默认 Clash 模板吗？")) {
-            document.getElementById('clash_tpl_area').value = "proxies:\n#PLACEHOLDER#";
-            showToast("已重置 Clash 模板");
+    const OPENCLASH_FULL_TPL = `port: 7890
+socks-port: 7891
+mixed-port: 7890
+mode: rule
+log-level: info
+allow-lan: true
+external-controller: 0.0.0.0:9090
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fallback:
+    - 1.1.1.1
+    - 8.8.8.8
+proxies:
+#PLACEHOLDER#
+proxy-groups:
+  - name: 🚀 节点选择
+    type: select
+    proxies:
+      - ♻️ 自动优选
+      - 🎯 全球直连
+#PLACEHOLDER_NAMES#
+  - name: ♻️ 自动优选
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies:
+#PLACEHOLDER_NAMES#
+  - name: 🎯 全球直连
+    type: select
+    proxies:
+      - DIRECT
+  - name: 🐟 漏网之鱼
+    type: select
+    proxies:
+      - 🚀 节点选择
+      - 🎯 全球直连
+rules:
+  - GEOIP,CN,🎯 全球直连
+  - MATCH,🐟 漏网之鱼`;
+
+    function setOpenClashFullTpl() {
+        if (confirm("确定填入 OpenClash 完整分流配置模板吗？")) {
+            document.getElementById('clash_tpl_area').value = OPENCLASH_FULL_TPL;
+            showToast("已填入 OpenClash 完整分流模板");
         }
+    }
+
+    function resetClashTpl() {
+        if (confirm("确定重置为纯节点集 (Proxy-Provider) 模板吗？")) {
+            document.getElementById('clash_tpl_area').value = "proxies:\n#PLACEHOLDER#";
+            showToast("已重置为纯节点集模板");
+        }
+    }
+
+    function copyClashProvider() {
+        const base = document.getElementById('link-clash').value;
+        if (!base) return;
+        const provUrl = base + (base.includes('?') ? '&' : '?') + 'format=provider';
+        navigator.clipboard.writeText(provUrl).then(() => {
+            showToast("已复制 OpenClash 代理集 (Proxy-Provider) 订阅链接！");
+        }).catch(() => {
+            prompt("请手动复制链接:", provUrl);
+        });
     }
 
     function resetSingboxTpl() {
