@@ -1097,7 +1097,15 @@ def parse_uri(uri):
                     'sid': q.get('sid', [''])[0],
                     'fp': q.get('fp', ['chrome'])[0],
                 })
-            if q.get('insecure', ['0'])[0] == '1' or q.get('allowInsecure', ['0'])[0] == '1':
+            is_insecure = (
+                q.get('insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('allowInsecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('allow_insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('skip-cert-verify', ['0'])[0] in ['1', 'true', 'True']
+            )
+            server_host = str(server or '')
+            is_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_host) or server_host.startswith('[') or ':' in server_host)
+            if is_insecure or (is_ip and not b.get('reality') and b.get('sni')):
                 b['skip-cert-verify'] = True
             if q.get('fp'):
                 b['fp'] = q.get('fp')[0]
@@ -1110,8 +1118,8 @@ def parse_uri(uri):
                 b.update({
                     'xhttp-path': q.get('path', ['/'])[0],
                     'xhttp-host': q.get('host', [''])[0] or q.get('sni', [''])[0],
-                    'xhttp-mode': q.get('mode', ['packet-up'])[0],
-                    'alpn': q.get('alpn', ['h3'])[0].split(',') if q.get('alpn') else ['h3']
+                    'xhttp-mode': q.get('mode', ['auto'])[0],
+                    'alpn': q.get('alpn', [''])[0].split(',') if q.get('alpn') else []
                 })
             return b
 
@@ -1351,7 +1359,14 @@ def parse_uri(uri):
                 else:
                     b["_ports_mode"] = "multi"
 
-            if q.get('insecure', ['0'])[0] == '1' or q.get('allowInsecure', ['0'])[0] == '1' or q.get('allow_insecure', ['0'])[0] == '1':
+            is_insecure = (
+                q.get('insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('allowInsecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('allow_insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('skip-cert-verify', ['0'])[0] in ['1', 'true', 'True']
+            )
+            is_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host) or host.startswith('[') or ':' in host)
+            if is_insecure or is_ip or (b.get('sni') and b.get('sni') != host):
                 b['skip-cert-verify'] = True
             return b
 
@@ -1372,11 +1387,16 @@ def parse_uri(uri):
                 'congestion_control': q.get('congestion_control', ['bbr'])[0]
             })
 
-            # [v42.31 Fix] 兼容多种 insecure 写法
-            is_insecure = q.get('allow_insecure', ['0'])[0] == '1' or \
-                          q.get('allowInsecure', ['0'])[0] == '1' or \
-                          q.get('insecure', ['0'])[0] == '1'
-            if is_insecure:
+            # [v42.31 Fix] 兼容多种 insecure 写法与 IP 直连默认跳过证书校验
+            is_insecure = (
+                q.get('allow_insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('allowInsecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('insecure', ['0'])[0] in ['1', 'true', 'True'] or
+                q.get('skip-cert-verify', ['0'])[0] in ['1', 'true', 'True']
+            )
+            server_host = str(server or '')
+            is_ip = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_host) or server_host.startswith('[') or ':' in server_host)
+            if is_insecure or is_ip or (b.get('sni') and b.get('sni') != server_host):
                 b['skip-cert-verify'] = True
             return b
 
@@ -1423,9 +1443,13 @@ def gen_clash(n, ip=None, port=None, name=None):
                 c['xhttp-opts'] = {
                     'path': n.get('xhttp-path') or n.get('ws-path') or '/',
                     'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
-                    'mode': n.get('xhttp-mode') or 'packet-up'
+                    'mode': n.get('xhttp-mode') or 'auto'
                 }
-                c['alpn'] = ['h3']
+                eff_port = int(port or n.get('port') or 443)
+                if eff_port == 443:
+                    c['alpn'] = ['h3', 'h2', 'http/1.1']
+                else:
+                    c['alpn'] = ['h2', 'http/1.1']
         elif n['type'] == 'vmess':
             c.update({"uuid":n['uuid'], "alterId":n['alterId'], "cipher":"auto", "network":n['network']})
             if n.get('tls'): c['tls']=True; c['servername']=n.get('sni')
@@ -1437,9 +1461,13 @@ def gen_clash(n, ip=None, port=None, name=None):
                 c['xhttp-opts'] = {
                     'path': n.get('xhttp-path') or n.get('ws-path') or '/',
                     'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
-                    'mode': n.get('xhttp-mode') or 'packet-up'
+                    'mode': n.get('xhttp-mode') or 'auto'
                 }
-                c['alpn'] = ['h3']
+                eff_port = int(port or n.get('port') or 443)
+                if eff_port == 443:
+                    c['alpn'] = ['h3', 'h2', 'http/1.1']
+                else:
+                    c['alpn'] = ['h2', 'http/1.1']
         elif n['type'] == 'trojan':
             c.update({"password":n['password'], "network":n.get('network','tcp')})
             if n.get('sni'): c['sni'] = n['sni']
@@ -1521,8 +1549,13 @@ def gen_uri(n, ip=None, port=None, name=None):
             p['headerType'] = n['headerType']
         elif n.get('network', 'tcp') == 'tcp':
             p['headerType'] = 'none'
-        if n.get('skip-cert-verify'):
-            p['insecure'] = '1'; p['allowInsecure'] = '1'
+        server_str = str(server)
+        is_ip_server = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_str) or server_str.startswith('[') or ':' in server_str)
+        sni = n.get('sni', '')
+        should_skip_cert = n.get('skip-cert-verify') or (is_ip_server and sni and not n.get('reality'))
+
+        if should_skip_cert:
+            p['insecure'] = '1'; p['allowInsecure'] = '1'; p['allow_insecure'] = '1'; p['skip-cert-verify'] = '1'
         if n.get('network') == 'ws':
             p.update({'path': n.get('ws-path', '/'), 'host': n.get('ws-host', '')})
         elif n.get('network') == 'grpc':
@@ -1531,8 +1564,10 @@ def gen_uri(n, ip=None, port=None, name=None):
             p['type'] = 'xhttp'
             p['path'] = n.get('xhttp-path') or n.get('ws-path') or '/'
             p['host'] = n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or ''
-            p['mode'] = n.get('xhttp-mode') or 'packet-up'
-            p['alpn'] = 'h3'
+            p['mode'] = n.get('xhttp-mode') or 'auto'
+            eff_port = int(port or n.get('port') or 443)
+            if eff_port == 443 and n.get('alpn') and 'h3' in n.get('alpn'):
+                p['alpn'] = 'h3,h2'
         return f"vless://{n['uuid']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'vmess':
         j = {"v":"2", "ps":name or n['name'], "add":server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
@@ -1548,11 +1583,17 @@ def gen_uri(n, ip=None, port=None, name=None):
         elif n.get('network')=='grpc': p['serviceName'] = n.get('grpc-name','')
         return f"trojan://{n['password']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'hysteria2':
-        p = {'sni': n.get('sni', ''), 'alpn': n.get('alpn', 'h3')}
-        if n.get('skip-cert-verify'):
+        server_str = str(server)
+        is_ip_server = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_str) or server_str.startswith('[') or ':' in server_str)
+        sni = n.get('sni', '')
+        skip_cert = n.get('skip-cert-verify') or is_ip_server or (sni and server_str != sni)
+
+        p = {'sni': sni, 'alpn': n.get('alpn', 'h3')}
+        if skip_cert:
             p['insecure'] = '1'
             p['allowInsecure'] = '1'
             p['allow_insecure'] = '1'
+            p['skip-cert-verify'] = '1'
 
         # Port hopping support:
         # - If original was ?mport=..., keep mport in query for compatibility.
@@ -1579,11 +1620,17 @@ def gen_uri(n, ip=None, port=None, name=None):
 
         return f"hysteria2://{n.get('password','')}@{server}:{port_part}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'tuic':
-        p = {'sni':n.get('sni',''), 'congestion_control':n.get('congestion_control','bbr'), 'alpn': n.get('alpn', 'h3')}
-        if n.get('skip-cert-verify'):
+        server_str = str(server)
+        is_ip_server = bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", server_str) or server_str.startswith('[') or ':' in server_str)
+        sni = n.get('sni', '')
+        skip_cert = n.get('skip-cert-verify') or is_ip_server or (sni and server_str != sni)
+
+        p = {'sni': sni, 'congestion_control': n.get('congestion_control', 'bbr'), 'alpn': n.get('alpn', 'h3')}
+        if skip_cert:
             p['allow_insecure'] = '1'
             p['allowInsecure'] = '1'
             p['insecure'] = '1'
+            p['skip-cert-verify'] = '1'
         return f"tuic://{n['uuid']}:{n['password']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'anytls':
         p = {}
