@@ -988,6 +988,13 @@ def clash_to_internal(p):
         node['network'] = 'grpc'
         grpc_opts = p.get('grpc-opts', {})
         node['grpc-name'] = grpc_opts.get('grpc-service-name', '')
+    elif net in ['xhttp', 'splithttp'] or p.get('xhttp-opts') or p.get('splithttp-opts'):
+        node['network'] = 'xhttp'
+        x_opts = p.get('xhttp-opts') or p.get('splithttp-opts') or {}
+        node['xhttp-path'] = x_opts.get('path', '/')
+        node['xhttp-host'] = x_opts.get('host', '') or p.get('servername', '')
+        node['xhttp-mode'] = x_opts.get('mode', 'packet-up')
+        node['alpn'] = p.get('alpn') or ['h3']
         
     return node
 
@@ -1051,6 +1058,14 @@ def parse_uri(uri):
                 b.update({'ws-path': q.get('path', ['/'])[0], 'ws-host': q.get('host', [''])[0]})
             elif b['network'] == 'grpc':
                 b['grpc-name'] = q.get('serviceName', [''])[0]
+            elif b['network'] in ['xhttp', 'splithttp']:
+                b['network'] = 'xhttp'
+                b.update({
+                    'xhttp-path': q.get('path', ['/'])[0],
+                    'xhttp-host': q.get('host', [''])[0] or q.get('sni', [''])[0],
+                    'xhttp-mode': q.get('mode', ['packet-up'])[0],
+                    'alpn': q.get('alpn', ['h3'])[0].split(',') if q.get('alpn') else ['h3']
+                })
             return b
 
         elif p.scheme == "vmess":
@@ -1356,12 +1371,28 @@ def gen_clash(n, ip=None, port=None, name=None):
             if n.get('fp'): c['client-fingerprint'] = n['fp']
             if n['network']=='ws': c['ws-opts'] = {'path':n.get('ws-path'), 'headers':{'Host':n.get('ws-host')}}
             elif n['network']=='grpc': c['grpc-opts'] = {'grpc-service-name':n.get('grpc-name')}
+            elif n['network'] in ['xhttp', 'splithttp']:
+                c['network'] = 'xhttp'
+                c['xhttp-opts'] = {
+                    'path': n.get('xhttp-path') or n.get('ws-path') or '/',
+                    'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
+                    'mode': n.get('xhttp-mode') or 'packet-up'
+                }
+                c['alpn'] = ['h3']
         elif n['type'] == 'vmess':
             c.update({"uuid":n['uuid'], "alterId":n['alterId'], "cipher":"auto", "network":n['network']})
             if n.get('tls'): c['tls']=True; c['servername']=n.get('sni')
             else: c['tls']=False
             if n['network']=='ws': c['ws-opts'] = {'path':n.get('ws-path'), 'headers':{'Host':n.get('ws-host')}}
             elif n['network']=='grpc': c['grpc-opts'] = {'grpc-service-name':n.get('grpc-name')}
+            elif n['network'] in ['xhttp', 'splithttp']:
+                c['network'] = 'xhttp'
+                c['xhttp-opts'] = {
+                    'path': n.get('xhttp-path') or n.get('ws-path') or '/',
+                    'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
+                    'mode': n.get('xhttp-mode') or 'packet-up'
+                }
+                c['alpn'] = ['h3']
         elif n['type'] == 'trojan':
             c.update({"password":n['password'], "network":n.get('network','tcp')})
             if n.get('sni'): c['sni'] = n['sni']
@@ -1449,6 +1480,12 @@ def gen_uri(n, ip=None, port=None, name=None):
             p.update({'path': n.get('ws-path', '/'), 'host': n.get('ws-host', '')})
         elif n.get('network') == 'grpc':
             p['serviceName'] = n.get('grpc-name', '')
+        elif n.get('network') in ['xhttp', 'splithttp']:
+            p['type'] = 'xhttp'
+            p['path'] = n.get('xhttp-path') or n.get('ws-path') or '/'
+            p['host'] = n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or ''
+            p['mode'] = n.get('xhttp-mode') or 'packet-up'
+            p['alpn'] = 'h3'
         return f"vless://{n['uuid']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'vmess':
         j = {"v":"2", "ps":name or n['name'], "add":server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
@@ -1590,6 +1627,16 @@ def gen_singbox(n, ip=None, port=None, name=None):
                 if n.get('grpc-name'):
                     grpc["service_name"] = n['grpc-name']
                 return grpc
+            elif net in ['xhttp', 'splithttp']:
+                xh = {
+                    "type": "xhttp",
+                    "path": n.get('xhttp-path') or n.get('ws-path') or "/",
+                    "mode": n.get('xhttp-mode') or "packet-up"
+                }
+                host_val = n.get('xhttp-host') or n.get('ws-host')
+                if host_val:
+                    xh["headers"] = {"Host": host_val}
+                return xh
             return None
 
         sb = {"type": ntype, "tag": tag, "server": server}
@@ -1597,7 +1644,8 @@ def gen_singbox(n, ip=None, port=None, name=None):
         if ntype == 'vless':
             sb.update({"server_port": port, "uuid": n['uuid']})
             if n.get('flow'): sb["flow"] = n['flow']
-            if n.get('tls') or n.get('reality'): sb["tls"] = build_tls()
+            def_alpn = ['h3'] if n.get('network') in ['xhttp', 'splithttp'] else None
+            if n.get('tls') or n.get('reality'): sb["tls"] = build_tls(default_alpn=def_alpn)
             trans = build_transport()
             if trans: sb["transport"] = trans
             return sb
@@ -1983,8 +2031,8 @@ async def async_process_subs():
                     ports_fp = ''
                     if n.get('ports'): ports_fp = str(n.get('ports'))
                     elif n.get('server_ports'): ports_fp = ','.join([str(x) for x in n.get('server_ports')])
-                    path_fp = n.get('ws-path') or n.get('grpc-name') or ''
-                    host_fp = n.get('ws-host') or n.get('sni') or ''
+                    path_fp = n.get('ws-path') or n.get('grpc-name') or n.get('xhttp-path') or ''
+                    host_fp = n.get('ws-host') or n.get('xhttp-host') or n.get('sni') or ''
                     name_fp = n.get('name') or ''
                     tag_fp = n.get('_tag') or ''
                     fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('password','')}|{n.get('server')}|{n.get('port')}|{ports_fp}|{path_fp}|{host_fp}|{name_fp}|{tag_fp}"
@@ -2761,7 +2809,7 @@ def sub():
         target_ips = [None]
         if not raw_mode:
             is_opt_enable = n.get('_opt', True)
-            is_protocol_support = n['type'] in ['vless', 'vmess', 'trojan'] and n.get('network') in ['ws', 'grpc']
+            is_protocol_support = n['type'] in ['vless', 'vmess', 'trojan'] and n.get('network') in ['ws', 'grpc', 'xhttp', 'splithttp']
             if n.get('reality'): is_protocol_support = False
             
             if is_opt_enable and is_protocol_support and ips:
