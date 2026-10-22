@@ -2596,36 +2596,43 @@ def require_auth():
                 return redirect(f"{cur_login_path}?err=1")
         return render_template('login.html', login_path=get_login_path(), stealth_mode=is_stealth_mode())
 
-    # 公共允许路径 (免拦截)
-    # 注意: /api/status 已从公开放行列表中移除，防止公网端口扫描器抓取优选 IP 库与节点状态
-    # /sub 端点内置 Token 鉴权逻辑，继续放行
-    allowed_endpoints = ['/login', '/api/login', '/logout']
-    if request.path in allowed_endpoints:
+    # 公共允许免拦截端点
+    if request.path in ['/api/login', '/logout']:
         return None
 
+    # /sub 订阅端点内置 Token 鉴权放行
     if request.path == '/sub' or request.path.startswith('/sub?') or request.path.startswith('/sub/'):
         return None
 
+    # 已登录用户鉴权
     if is_authenticated():
+        # 若已启用专属私密入口，历史 /login 或 /admin_login 必须返回 404，不跳转
+        if request.path == '/login' and cur_login_path != '/login':
+            return "404 Not Found", 404
+        if request.path == f'/{LOGIN_PATH}' and cur_login_path != f'/{LOGIN_PATH}':
+            return "404 Not Found", 404
         return None
 
     # 未授权访问 API 直接返回 401 JSON，防止端口扫描器和未授权用户获取数据
     if request.path.startswith('/api/'):
         return jsonify({"status": "error", "msg": "未授权访问，请先通过管理员密码登录", "need_login": True}), 401
 
-    # 在开启隐蔽模式 (stealth_mode) 时，未经认证直接访问根路径 / 或 /login 返回无指纹 404，迷惑自动化扫描器
-    if is_stealth_mode() and (request.path == '/' or (request.path == '/login' and cur_login_path != '/login')):
-        return "404 Not Found", 404
+    # 根路径 / 仅在未开启隐蔽模式且入口为默认 /login 或 /{LOGIN_PATH} 时允许重定向
+    # 一旦用户设置了专属私密路径或开启隐蔽模式，直接返回 404，杜绝向端口扫描器泄露私密路径
+    if request.path == '/' and not is_stealth_mode() and (cur_login_path in ['/login', f'/{LOGIN_PATH}']):
+        return redirect(cur_login_path)
 
-    # 默认重定向至动态管理登录入口
-    return redirect(cur_login_path)
+    # 其他所有未授权路径（包括旧私密路径、/login、/admin_login、未知探测路径等）一律返回 404！
+    # 绝不 302 重定向到新私密路径（重定向会直接向扫描器泄露新私密路径，且让旧路径表现为依旧生效）
+    return "404 Not Found", 404
 
 @app.route('/')
 def root():
     if not is_authenticated():
-        if is_stealth_mode():
-            return "404 Not Found", 404
-        return redirect('/' + get_login_path())
+        cur_login_path = '/' + get_login_path()
+        if not is_stealth_mode() and (cur_login_path in ['/login', f'/{LOGIN_PATH}']):
+            return redirect(cur_login_path)
+        return "404 Not Found", 404
 
     d = load_data()
     logs = ""
@@ -2641,7 +2648,7 @@ def root():
 @app.route('/login', methods=['GET', 'POST'])
 def login_route():
     cur_login_path = '/' + get_login_path()
-    if is_stealth_mode() and cur_login_path != '/login':
+    if cur_login_path != '/login':
         return "404 Not Found", 404
     if is_authenticated():
         return redirect('/')
@@ -2650,7 +2657,7 @@ def login_route():
 @app.route(f'/{LOGIN_PATH}', methods=['GET', 'POST'])
 def admin_entry():
     cur_login_path = '/' + get_login_path()
-    if is_stealth_mode() and cur_login_path != f'/{LOGIN_PATH}':
+    if cur_login_path != f'/{LOGIN_PATH}':
         return "404 Not Found", 404
     if is_authenticated():
         return redirect('/')
