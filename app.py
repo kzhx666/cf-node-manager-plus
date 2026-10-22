@@ -1655,11 +1655,13 @@ def gen_clash(n, ip=None, port=None, name=None):
                 "ip": n.get('ip', '10.8.0.2'),
                 "public-key": pub_key,
                 "private-key": pri_key,
+                "allowed-ips": ["0.0.0.0/0", "::/0"],
                 "udp": True,
-                "remote-dns-resolve": True,
+                "remote-dns-resolve": False,
                 "dns": ["1.1.1.1", "8.8.8.8"]
             }
             if psk_key:
+                c["pre-shared-key"] = psk_key
                 c["preshared-key"] = psk_key
             if n.get('jc') is not None or n.get('s1') is not None:
                 c["amnezia-wg-option"] = {
