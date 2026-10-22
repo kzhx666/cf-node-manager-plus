@@ -1021,6 +1021,20 @@ def clash_to_internal(p):
         if p.get('plugin'):
             node['plugin'] = p.get('plugin')
             node['plugin_opts'] = p.get('plugin-opts', {})
+
+    elif t in ['wireguard', 'awg']:
+        node['type'] = 'wireguard'
+        node['ip'] = p.get('ip', '10.8.0.2')
+        node['public-key'] = p.get('public-key', '')
+        node['private-key'] = p.get('private-key', '')
+        if p.get('preshared-key'):
+            node['psk'] = p.get('preshared-key')
+        awg_opt = p.get('amnezia-wg-option') or {}
+        for k in ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4']:
+            if k in awg_opt:
+                node[k] = awg_opt[k]
+            elif k in p:
+                node[k] = p[k]
             
     net = p.get('network', 'tcp')
     node['network'] = net
@@ -1047,7 +1061,7 @@ def clash_to_internal(p):
 
 def decode_sub_content(content):
     content = content.strip()
-    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
+    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://', 'awg://', 'wireguard://']):
         return parse_uri_list([content])
     try:
         if yaml and ("proxies:" in content or "Proxy:" in content):
@@ -1400,6 +1414,42 @@ def parse_uri(uri):
                 b['skip-cert-verify'] = True
             return b
 
+        elif p.scheme in ["awg", "wireguard"]:
+            try:
+                netloc = p.netloc or ""
+                client_pri = p.username or ""
+                server_part = p.hostname or ""
+                port_val = p.port or 51820
+                if not client_pri and "@" in netloc:
+                    client_pri, rest = netloc.rsplit("@", 1)
+                    client_pri = urllib.parse.unquote(client_pri)
+                    server_part, port_str = split_host_port(rest, 51820)
+                    port_val = int(port_str) if port_str else 51820
+
+                b.update({
+                    'type': 'wireguard',
+                    'name': name or 'AmneziaWG',
+                    'server': server_part,
+                    'port': int(port_val),
+                    'private-key': client_pri,
+                    'public-key': q.get('publickey', [''])[0] or q.get('public-key', [''])[0] or q.get('pubkey', [''])[0],
+                    'ip': q.get('address', ['10.8.0.2'])[0].split('/')[0],
+                    'psk': q.get('psk', [''])[0] or q.get('preshared-key', [''])[0],
+                    'jc': int(q.get('jc', [4])[0]) if q.get('jc') else 4,
+                    'jmin': int(q.get('jmin', [50])[0]) if q.get('jmin') else 50,
+                    'jmax': int(q.get('jmax', [1000])[0]) if q.get('jmax') else 1000,
+                    's1': int(q.get('s1', [15])[0]) if q.get('s1') else 15,
+                    's2': int(q.get('s2', [20])[0]) if q.get('s2') else 20,
+                    'h1': int(q.get('h1', [1])[0]) if q.get('h1') else 1,
+                    'h2': int(q.get('h2', [2])[0]) if q.get('h2') else 2,
+                    'h3': int(q.get('h3', [3])[0]) if q.get('h3') else 3,
+                    'h4': int(q.get('h4', [4])[0]) if q.get('h4') else 4,
+                    'udp': True
+                })
+                return b
+            except:
+                pass
+
     except:
         pass
     return None
@@ -1528,6 +1578,34 @@ def gen_clash(n, ip=None, port=None, name=None):
                 if n['plugin'] == 'v2ray-plugin':
                     c['plugin-opts'] = {'mode': popts.get('mode', 'websocket'), 'host': popts.get('host', ''), 'path': popts.get('path', '/'), 'tls': True if 'tls' in popts else False, 'skip-cert-verify': True if 'skip-cert-verify' in popts else False, 'mux': False, 'headers': {'Host': popts.get('host', ''), 'User-Agent': 'Mozilla/5.0'}}
                 else: c['plugin-opts'] = popts
+        elif n['type'] in ['wireguard', 'awg']:
+            c = {
+                "name": name or n['name'],
+                "type": "wireguard",
+                "server": ip or n['server'],
+                "port": int(port or n.get('port', 51820)),
+                "ip": n.get('ip', '10.8.0.2'),
+                "public-key": n.get('public-key', ''),
+                "private-key": n.get('private-key', ''),
+                "udp": True,
+                "remote-dns-resolve": True,
+                "dns": ["1.1.1.1", "8.8.8.8"]
+            }
+            if n.get('psk'):
+                c["preshared-key"] = n['psk']
+            if n.get('jc') is not None or n.get('s1') is not None:
+                c["amnezia-wg-option"] = {
+                    "jc": int(n.get('jc', 4)),
+                    "jmin": int(n.get('jmin', 50)),
+                    "jmax": int(n.get('jmax', 1000)),
+                    "s1": int(n.get('s1', 15)),
+                    "s2": int(n.get('s2', 20)),
+                    "h1": int(n.get('h1', 1)),
+                    "h2": int(n.get('h2', 2)),
+                    "h3": int(n.get('h3', 3)),
+                    "h4": int(n.get('h4', 4))
+                }
+            return c
         return c
     except: return None
 
@@ -1667,6 +1745,24 @@ def gen_uri(n, ip=None, port=None, name=None):
             plugin_str = urllib.parse.quote(f"{n['plugin']};{opt_str}")
             uri += f"/?plugin={plugin_str}"
         return f"{uri}#{remark}"
+    elif n['type'] in ['wireguard', 'awg']:
+        p = {
+            'publickey': n.get('public-key', ''),
+            'address': n.get('ip', '10.8.0.2'),
+            'jc': str(n.get('jc', 4)),
+            'jmin': str(n.get('jmin', 50)),
+            'jmax': str(n.get('jmax', 1000)),
+            's1': str(n.get('s1', 15)),
+            's2': str(n.get('s2', 20)),
+            'h1': str(n.get('h1', 1)),
+            'h2': str(n.get('h2', 2)),
+            'h3': str(n.get('h3', 3)),
+            'h4': str(n.get('h4', 4))
+        }
+        if n.get('psk'):
+            p['psk'] = n['psk']
+        pri = n.get('private-key', '')
+        return f"awg://{pri}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     return None
 
 def gen_singbox(n, ip=None, port=None, name=None):
@@ -1825,6 +1921,32 @@ def gen_singbox(n, ip=None, port=None, name=None):
             if n.get('quic'): sb['network'] = 'quic'
             return sb
 
+        elif ntype in ['wireguard', 'awg']:
+            sb.update({
+                "type": "wireguard",
+                "tag": tag,
+                "server": server,
+                "server_port": port,
+                "local_address": [f"{n.get('ip', '10.8.0.2')}/32"],
+                "private_key": n.get('private-key', ''),
+                "peer_public_key": n.get('public-key', '')
+            })
+            if n.get('psk'):
+                sb["pre_shared_key"] = n['psk']
+            if n.get('jc') is not None or n.get('s1') is not None:
+                sb.update({
+                    "jc": int(n.get('jc', 4)),
+                    "jmin": int(n.get('jmin', 50)),
+                    "jmax": int(n.get('jmax', 1000)),
+                    "s1": int(n.get('s1', 15)),
+                    "s2": int(n.get('s2', 20)),
+                    "h1": int(n.get('h1', 1)),
+                    "h2": int(n.get('h2', 2)),
+                    "h3": int(n.get('h3', 3)),
+                    "h4": int(n.get('h4', 4))
+                })
+            return sb
+
         return None
     except:
         return None
@@ -1955,7 +2077,7 @@ async def async_process_subs():
                 for line in lines:
                     if line.startswith('http'):
                         http_links.append(line)
-                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
+                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://', 'awg://', 'wireguard://']):
                         node = parse_uri(line)
                         if node: 
                             node['_tag'] = tag; node['_opt'] = enabled; direct_nodes.append(node)

@@ -1002,6 +1002,7 @@
         .proto-tuic { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
         .proto-ss { background: rgba(16, 185, 129, 0.2); color: #34d399; }
         .proto-xhttp, .proto-splithttp { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
+        .proto-awg, .proto-wireguard { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
         .proto-other { background: rgba(156, 163, 175, 0.2); color: #d1d5db; }
     </style>
 </head>
@@ -2943,9 +2944,15 @@
         });
     }
 
+    function getNodeCategory(n) {
+        if (n.network === 'xhttp' || n.network === 'splithttp') return 'XHTTP';
+        if (n.type === 'wireguard' || n.type === 'awg') return 'AWG';
+        return (n.type || 'other').toUpperCase();
+    }
+
     function renderProtoChips() {
         const container = document.getElementById('node-proto-chips');
-        const protos = ['ALL', ...new Set(cachedNodes.map(n => (n.type || 'other').toUpperCase()))];
+        const protos = ['ALL', ...new Set(cachedNodes.map(n => getNodeCategory(n)))];
         container.innerHTML = protos.map(p => `
             <div class="chip ${p === currentProtoFilter ? 'active' : ''}" style="padding: 3px 10px; font-size: 0.76rem;" onclick="filterByProto('${p}')">
                 ${p}
@@ -2963,8 +2970,9 @@
     function renderFilteredNodes() {
         const query = (document.getElementById('nodeModalSearch').value || '').toLowerCase();
         let filtered = cachedNodes.filter(n => {
-            const matchesProto = (currentProtoFilter === 'ALL') || ((n.type || '').toUpperCase() === currentProtoFilter);
-            const matchesSearch = !query || ((n.name || '') + (n.server || '') + (n.type || '')).toLowerCase().includes(query);
+            const cat = getNodeCategory(n);
+            const matchesProto = (currentProtoFilter === 'ALL') || (cat === currentProtoFilter) || ((n.type || '').toUpperCase() === currentProtoFilter);
+            const matchesSearch = !query || ((n.name || '') + (n.server || '') + (n.type || '') + (n.network || '')).toLowerCase().includes(query);
             return matchesProto && matchesSearch;
         });
 
@@ -2989,6 +2997,9 @@
             if (n.network === 'xhttp' || n.network === 'splithttp') {
                 protoClass = 'proto-xhttp';
                 badgeText = 'xHTTP (H3)';
+            } else if (n.type === 'wireguard' || n.type === 'awg') {
+                protoClass = 'proto-awg';
+                badgeText = 'AmneziaWG';
             }
             tbody.innerHTML += `
                 <tr style="border-bottom: 1px solid var(--card-border);">
