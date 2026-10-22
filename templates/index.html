@@ -1010,20 +1010,6 @@
 
 <div id="toast"><span id="toast-icon">✨</span><span id="toast-msg">提示消息</span></div>
 
-{% if not authorized %}
-<div style="min-height: 90vh; display: flex; align-items: center; justify-content: center;">
-    <div class="card" style="width: 100%; max-width: 380px; padding: 32px 28px; text-align: center;">
-        <div class="brand-icon" style="margin: 0 auto 16px; width: 48px; height: 48px; font-size: 1.5rem;">⚡</div>
-        <h2 style="font-weight: 800; font-size: 1.4rem; margin-bottom: 6px;">CF 优选 Pro 面板</h2>
-        <p style="color: var(--text-sec); font-size: 0.85rem; margin-bottom: 24px;">请输入管理员访问密码以继续</p>
-        <form method="POST">
-            <input type="password" name="password" placeholder="输入访问密码..." style="margin-bottom: 16px; padding: 12px;" required autofocus>
-            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 0.95rem;">解锁登录</button>
-        </form>
-    </div>
-</div>
-{% else %}
-
 <div class="container">
     <!-- Navbar -->
     <div class="navbar">
@@ -1035,6 +1021,7 @@
         <div class="nav-actions">
             <button type="button" class="btn btn-ghost btn-sm" onclick="openBackupModal()" title="系统配置备份与还原">💾 备份还原</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="切换明暗主题">🌓 主题</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openChangePasswordModal()" title="修改管理员密码">🔒 安全改密</button>
             <a href="/logout" class="btn btn-ghost btn-sm" title="退出管理" style="color: var(--danger);">退出</a>
         </div>
     </div>
@@ -1331,6 +1318,20 @@
                     <div>
                         <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">修改管理员密码 (留空则保持现状)</label>
                         <input type="password" name="cfg_web_password" placeholder="输入新密码以修改...">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">自定义私密管理路径 (默认: admin_login)</label>
+                        <input type="text" name="cfg_login_path" value="{{ data.config.login_path or 'admin_login' }}" placeholder="例如: admin_login 或 my_secret_panel">
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
+                            修改后管理入口变更为: <code>/{{ data.config.login_path or 'admin_login' }}</code>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">防扫描隐蔽模式 (Anti-Scanning Stealth)</label>
+                        <label style="display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer;">
+                            <input type="checkbox" name="cfg_stealth_mode" value="1" {% if data.config.stealth_mode %}checked{% endif %} style="accent-color: var(--primary); width: 16px; height: 16px;">
+                            <span style="font-size: 0.82rem; color: var(--text);">开启隐蔽模式（未授权直接访问根路径 <code>/</code> 返回 404，防止公网端口扫描器探测后台）</span>
+                        </label>
                     </div>
                     <div style="grid-column: span 2; background: rgba(99, 102, 241, 0.05); padding: 14px; border-radius: var(--radius-sm); border: 1px dashed var(--card-border);">
                         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
@@ -1678,6 +1679,35 @@
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('backupModal').style.display='none'">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 安全改密 Modal -->
+<div id="changePasswordModal" class="modal" onclick="this.style.display='none'">
+    <div class="modal-content" style="max-width: 440px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <div class="card-title">🔒 修改管理员密码</div>
+            <button type="button" class="btn-icon" onclick="document.getElementById('changePasswordModal').style.display='none'">×</button>
+        </div>
+        <div class="modal-body" style="padding: 20px;">
+            <div id="cp-alert-box" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.82rem; color: #fca5a5;"></div>
+            <div style="margin-bottom: 14px;">
+                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">当前原密码</label>
+                <input type="password" id="cp-old-password" placeholder="请输入当前管理员密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+            </div>
+            <div style="margin-bottom: 14px;">
+                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">新管理密码 (不少于 5 位)</label>
+                <input type="password" id="cp-new-password" placeholder="请输入新的管理员密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+            </div>
+            <div style="margin-bottom: 8px;">
+                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">确认新密码</label>
+                <input type="password" id="cp-confirm-password" placeholder="请再次输入新密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('changePasswordModal').style.display='none'">取消</button>
+            <button type="button" id="btn-submit-change-pwd" class="btn btn-primary btn-sm" onclick="submitChangePassword()">确认修改密码</button>
         </div>
     </div>
 </div>
@@ -3279,7 +3309,88 @@ rules:
             })
             .catch(() => {});
     }
+
+    function openChangePasswordModal() {
+        const alertBox = document.getElementById('cp-alert-box');
+        if (alertBox) alertBox.style.display = 'none';
+        const p1 = document.getElementById('cp-old-password');
+        const p2 = document.getElementById('cp-new-password');
+        const p3 = document.getElementById('cp-confirm-password');
+        if (p1) p1.value = '';
+        if (p2) p2.value = '';
+        if (p3) p3.value = '';
+        const m = document.getElementById('changePasswordModal');
+        if (m) {
+            m.style.display = 'flex';
+            if (p1) setTimeout(() => p1.focus(), 50);
+        }
+    }
+
+    async function submitChangePassword() {
+        const alertBox = document.getElementById('cp-alert-box');
+        const oldPwd = (document.getElementById('cp-old-password')?.value || '').trim();
+        const newPwd = (document.getElementById('cp-new-password')?.value || '').trim();
+        const confirmPwd = (document.getElementById('cp-confirm-password')?.value || '').trim();
+        const btn = document.getElementById('btn-submit-change-pwd');
+
+        if (alertBox) alertBox.style.display = 'none';
+
+        if (!oldPwd) {
+            if (alertBox) {
+                alertBox.textContent = '请输入当前原密码';
+                alertBox.style.display = 'block';
+            }
+            return;
+        }
+        if (!newPwd || newPwd.length < 5) {
+            if (alertBox) {
+                alertBox.textContent = '新密码长度不能少于 5 个字符';
+                alertBox.style.display = 'block';
+            }
+            return;
+        }
+        if (newPwd !== confirmPwd) {
+            if (alertBox) {
+                alertBox.textContent = '两次输入的新密码不一致，请核对后重试';
+                alertBox.style.display = 'block';
+            }
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在提交...';
+        }
+
+        try {
+            const res = await fetch('/api/auth/change_password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+            });
+            const data = await res.json();
+            if (data.status === 'success' || data.success) {
+                showToast('✅ 管理员密码修改成功！新凭据已生效', '🔑');
+                const m = document.getElementById('changePasswordModal');
+                if (m) m.style.display = 'none';
+            } else {
+                if (alertBox) {
+                    alertBox.textContent = data.msg || data.message || '密码修改失败';
+                    alertBox.style.display = 'block';
+                }
+            }
+        } catch (e) {
+            if (alertBox) {
+                alertBox.textContent = '网络请求异常: ' + e.message;
+                alertBox.style.display = 'block';
+            }
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '确认修改密码';
+            }
+        }
+    }
 </script>
-{% endif %}
 </body>
 </html>

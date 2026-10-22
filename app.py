@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json, base64, urllib.parse, os, copy, datetime, re, random, threading, time, socket, shutil, glob, asyncio, logging, zipfile, io, binascii, ssl
+import hmac, hashlib, uuid, sys
 from flask import Flask, request, render_template, render_template_string, Response, jsonify, send_file, redirect, make_response, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 from collections import deque
@@ -195,6 +196,8 @@ def load_data():
             "ua": "v2rayNG/1.8.5",
             "sub_token": WEB_PASSWORD,
             "web_password": WEB_PASSWORD,
+            "login_path": LOGIN_PATH,
+            "stealth_mode": False,
             "custom_groups": "snip, work",
             "probe_type": "komari",
             "probe_url": "",
@@ -216,6 +219,8 @@ def load_data():
                 if "clash_tpl" not in d: d["clash_tpl"] = default_conf["clash_tpl"]
                 if "cached_probe_nodes" not in d: d["cached_probe_nodes"] = []
                 if "web_password" not in d["config"]: d["config"]["web_password"] = WEB_PASSWORD
+                if "login_path" not in d["config"]: d["config"]["login_path"] = LOGIN_PATH
+                if "stealth_mode" not in d["config"]: d["config"]["stealth_mode"] = False
                 if "probe_type" not in d["config"]: d["config"]["probe_type"] = "komari"
                 if "probe_url" not in d["config"]: d["config"]["probe_url"] = d["config"].get("nezha_url", "")
                 if "probe_token" not in d["config"]: d["config"]["probe_token"] = d["config"].get("nezha_token", "")
@@ -249,27 +254,123 @@ def save_data(data):
             os.replace(tmp, DATA_FILE)
         except Exception as e: write_log(f"Save Error: {e}")
 
+def get_secret_key():
+    key_file = os.path.join(DATA_DIR, ".secret_key")
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, "r", encoding="utf-8") as f:
+                k = f.read().strip()
+                if k: return k
+        except Exception: pass
+    k = uuid.uuid4().hex + uuid.uuid4().hex
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(key_file, "w", encoding="utf-8") as f:
+            f.write(k)
+    except Exception: pass
+    return k
+
+SECRET_KEY = get_secret_key()
+
+FAILED_ATTEMPTS = {}
+FAILED_LOCKS = {}
+RATE_LIMIT_LOCK = threading.Lock()
+
+def get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+def check_ip_rate_limit(ip):
+    now = time.time()
+    with RATE_LIMIT_LOCK:
+        if ip in FAILED_LOCKS:
+            if now < FAILED_LOCKS[ip]:
+                remaining = int(FAILED_LOCKS[ip] - now)
+                return False, f"登录失败过多，安全网关已临时阻断该 IP，请在 {remaining} 秒后再试"
+            else:
+                del FAILED_LOCKS[ip]
+                FAILED_ATTEMPTS.pop(ip, None)
+    return True, ""
+
+def record_failed_attempt(ip):
+    now = time.time()
+    with RATE_LIMIT_LOCK:
+        attempts = [t for t in FAILED_ATTEMPTS.get(ip, []) if now - t < 60]
+        attempts.append(now)
+        FAILED_ATTEMPTS[ip] = attempts
+        if len(attempts) >= 5:
+            FAILED_LOCKS[ip] = now + 60
+            return 60
+    return 0
+
+def record_successful_attempt(ip):
+    with RATE_LIMIT_LOCK:
+        FAILED_ATTEMPTS.pop(ip, None)
+        FAILED_LOCKS.pop(ip, None)
+
 def get_current_password():
     d = load_data()
     return d.get('config', {}).get('web_password') or WEB_PASSWORD
+
+def get_login_path():
+    d = load_data()
+    lp = (d.get('config', {}).get('login_path') or LOGIN_PATH).strip().lstrip('/')
+    clean = re.sub(r'[^a-zA-Z0-9_\-]', '', lp)
+    return clean if clean else "admin_login"
+
+def is_stealth_mode():
+    d = load_data()
+    return bool(d.get('config', {}).get('stealth_mode', False))
+
+def create_auth_token(password):
+    ts = str(int(time.time()))
+    pwd_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16]
+    payload = f"{ts}:{pwd_hash}"
+    sig = hmac.new(SECRET_KEY.encode('utf-8'), payload.encode('utf-8'), hashlib.sha256).hexdigest()[:16]
+    return f"{payload}:{sig}"
+
+def verify_auth_token(token, password):
+    if not token or not password:
+        return False
+    parts = token.split(':')
+    if len(parts) != 3:
+        return False
+    ts, pwd_hash, sig = parts
+    try:
+        created_time = int(ts)
+    except ValueError:
+        return False
+    if time.time() - created_time > 86400 * 30:
+        return False
+    expected_payload = f"{ts}:{pwd_hash}"
+    expected_sig = hmac.new(SECRET_KEY.encode('utf-8'), expected_payload.encode('utf-8'), hashlib.sha256).hexdigest()[:16]
+    if not hmac.compare_digest(sig, expected_sig):
+        return False
+    current_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()[:16]
+    return hmac.compare_digest(pwd_hash, current_hash)
 
 def is_authenticated():
     expected_pwd = get_current_password()
     d = load_data()
     sub_token = d.get('config', {}).get('sub_token') or expected_pwd
     valid_keys = {k for k in [expected_pwd, sub_token, WEB_PASSWORD] if k}
-    
-    # 1. Cookie 鉴权
+
+    # 1. Cookie 鉴权: 优先使用 HMAC 签名 Session Token，向下兼容历史明文 Cookie
+    cookie_session = request.cookies.get('auth_session')
+    if cookie_session and (verify_auth_token(cookie_session, expected_pwd) or (sub_token and verify_auth_token(cookie_session, sub_token))):
+        return True
     cookie_auth = request.cookies.get('auth')
     if cookie_auth and cookie_auth in valid_keys:
         return True
-        
+
     # 2. Authorization Header (Bearer <token> 或直接 <token>)
     auth_header = request.headers.get('Authorization', '').strip()
     if auth_header:
         token = auth_header[7:].strip() if auth_header.lower().startswith('bearer ') else auth_header
-        if token and token in valid_keys:
-            return True
+        if token:
+            if token in valid_keys:
+                return True
+            if verify_auth_token(token, expected_pwd):
+                return True
 
     # 3. 自定义 Header
     custom_key = request.headers.get('X-API-Key', '').strip() or request.headers.get('X-Token', '').strip()
@@ -2420,46 +2521,157 @@ threading.Thread(target=auto_sync_task, daemon=True).start()
 
 @app.before_request
 def require_auth():
-    allowed_prefixes = [f"/{LOGIN_PATH}", "/static", "/api/status", "/sub"]
-    if any(request.path == p or request.path.startswith(p + '/') or request.path.startswith(p + '?') for p in allowed_prefixes):
+    # 静态资源与浏览器图标始终放行
+    if request.path.startswith('/static') or request.path == '/favicon.ico':
         return None
-    if not is_authenticated():
-        if request.path.startswith('/api/'):
-            return jsonify({"status": "error", "msg": "未授权访问，请先登录"}), 401
-        return redirect(f"/{LOGIN_PATH}")
+
+    cur_login_path = '/' + get_login_path()
+
+    # 动态匹配当前设定的自定义管理路径
+    if request.path == cur_login_path:
+        if is_authenticated():
+            return redirect('/')
+        if request.method == 'POST':
+            pwd = request.form.get('password', '').strip()
+            current_pwd = get_current_password()
+            ip = get_client_ip()
+            allowed, err_msg = check_ip_rate_limit(ip)
+            if not allowed:
+                return jsonify({"status": "error", "msg": err_msg}), 429
+            if hmac.compare_digest(pwd, current_pwd):
+                record_successful_attempt(ip)
+                resp = make_response(redirect('/'))
+                token = create_auth_token(current_pwd)
+                resp.set_cookie('auth_session', token, max_age=86400*30, httponly=True, samesite='Lax')
+                resp.set_cookie('auth', current_pwd, max_age=86400*30, httponly=True, samesite='Lax')
+                return resp
+            else:
+                record_failed_attempt(ip)
+                return redirect(f"{cur_login_path}?err=1")
+        return render_template('login.html', login_path=get_login_path(), stealth_mode=is_stealth_mode())
+
+    # 公共允许路径 (免拦截)
+    # 注意: /api/status 已从公开放行列表中移除，防止公网端口扫描器抓取优选 IP 库与节点状态
+    # /sub 端点内置 Token 鉴权逻辑，继续放行
+    allowed_endpoints = ['/login', '/api/login', '/logout']
+    if request.path in allowed_endpoints:
+        return None
+
+    if request.path == '/sub' or request.path.startswith('/sub?') or request.path.startswith('/sub/'):
+        return None
+
+    if is_authenticated():
+        return None
+
+    # 未授权访问 API 直接返回 401 JSON，防止端口扫描器和未授权用户获取数据
+    if request.path.startswith('/api/'):
+        return jsonify({"status": "error", "msg": "未授权访问，请先通过管理员密码登录", "need_login": True}), 401
+
+    # 在开启隐蔽模式 (stealth_mode) 时，未经认证直接访问根路径 / 或 /login 返回无指纹 404，迷惑自动化扫描器
+    if is_stealth_mode() and (request.path == '/' or (request.path == '/login' and cur_login_path != '/login')):
+        return "404 Not Found", 404
+
+    # 默认重定向至动态管理登录入口
+    return redirect(cur_login_path)
 
 @app.route('/')
-def root(): return redirect(f'/{LOGIN_PATH}')
+def root():
+    if not is_authenticated():
+        if is_stealth_mode():
+            return "404 Not Found", 404
+        return redirect('/' + get_login_path())
+
+    d = load_data()
+    logs = ""
+    if os.path.exists(LOG_FILE):
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+                logs = "".join(deque(f, maxlen=50))
+        except: pass
+    current_pwd = get_current_password()
+    token = d.get('config', {}).get('sub_token') or current_pwd
+    return render_template('index.html', authorized=True, data=d, node_count=len(d.get('cached_nodes',[])), logs=logs, sub_url=f"{request.url_root}sub?token={token}", login_path=get_login_path(), stealth_mode=is_stealth_mode())
+
+@app.route('/login', methods=['GET', 'POST'])
+def login_route():
+    cur_login_path = '/' + get_login_path()
+    if is_stealth_mode() and cur_login_path != '/login':
+        return "404 Not Found", 404
+    if is_authenticated():
+        return redirect('/')
+    return render_template('login.html', login_path=get_login_path(), stealth_mode=is_stealth_mode())
 
 @app.route(f'/{LOGIN_PATH}', methods=['GET', 'POST'])
 def admin_entry():
-    current_pwd = get_current_password()
-    if request.method == 'POST':
-        if request.form.get('password') == current_pwd:
-            resp = make_response(redirect(f'/{LOGIN_PATH}'))
-            resp.set_cookie('auth', current_pwd, max_age=86400*30, httponly=True, samesite='Lax')
-            return resp
-        return render_template('index.html', authorized=False)
+    cur_login_path = '/' + get_login_path()
+    if is_stealth_mode() and cur_login_path != f'/{LOGIN_PATH}':
+        return "404 Not Found", 404
     if is_authenticated():
-        d = load_data()
-        logs = ""
-        if os.path.exists(LOG_FILE):
-            try:
-                with open(LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
-                    logs = "".join(deque(f, maxlen=50))
-            except: pass
-        token = d.get('config', {}).get('sub_token') or current_pwd
-        return render_template('index.html', authorized=True, data=d, node_count=len(d.get('cached_nodes',[])), logs=logs, sub_url=f"{request.url_root}sub?token={token}")
-    return render_template('index.html', authorized=False)
+        return redirect('/')
+    return render_template('login.html', login_path=get_login_path(), stealth_mode=is_stealth_mode())
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    ip = get_client_ip()
+    allowed, err_msg = check_ip_rate_limit(ip)
+    if not allowed:
+        return jsonify({"status": "error", "msg": err_msg}), 429
+
+    data = request.get_json(silent=True) if request.is_json else (request.form or {})
+    if not data:
+        data = {}
+    password = str(data.get("password") or "").strip()
+    remember = bool(data.get("remember", True))
+    current_pwd = get_current_password()
+
+    if hmac.compare_digest(password, current_pwd):
+        record_successful_attempt(ip)
+        token = create_auth_token(current_pwd)
+        max_age = 86400 * 30 if remember else None
+        resp = make_response(jsonify({"status": "success", "msg": "登录成功"}))
+        resp.set_cookie('auth_session', token, max_age=max_age, httponly=True, samesite='Lax')
+        resp.set_cookie('auth', current_pwd, max_age=max_age, httponly=True, samesite='Lax')
+        return resp
+    else:
+        lock_sec = record_failed_attempt(ip)
+        if lock_sec > 0:
+            return jsonify({"status": "error", "msg": f"密码错误！连续失败次数过多，安全网关已锁定该 IP {lock_sec} 秒"}), 429
+        return jsonify({"status": "error", "msg": "管理员密码错误，请重新输入"}), 400
+
+@app.route('/api/auth/change_password', methods=['POST'])
+def api_change_password():
+    if not is_authenticated():
+        return jsonify({"status": "error", "msg": "未登录或登录凭据已过期"}), 401
+
+    data = request.get_json(silent=True) if request.is_json else (request.form or {})
+    if not data:
+        data = {}
+    old_pwd = str(data.get("old_password") or "").strip()
+    new_pwd = str(data.get("new_password") or "").strip()
+    current_pwd = get_current_password()
+
+    if not hmac.compare_digest(old_pwd, current_pwd):
+        return jsonify({"status": "error", "msg": "当前原密码输入错误，无法修改"}), 400
+    if not new_pwd or len(new_pwd) < 5:
+        return jsonify({"status": "error", "msg": "新密码长度不能少于 5 个字符"}), 400
+
+    d = load_data()
+    d.setdefault('config', {})['web_password'] = new_pwd
+    save_data(d)
+
+    new_token = create_auth_token(new_pwd)
+    resp = make_response(jsonify({"status": "success", "msg": "管理员密码修改成功！"}))
+    resp.set_cookie('auth_session', new_token, max_age=86400 * 30, httponly=True, samesite='Lax')
+    resp.set_cookie('auth', new_pwd, max_age=86400 * 30, httponly=True, samesite='Lax')
+    return resp
 
 @app.route('/logout')
 def logout():
-    resp = make_response(redirect(f'/{LOGIN_PATH}'))
+    cur_login_path = '/' + get_login_path()
+    resp = make_response(redirect(cur_login_path))
+    resp.delete_cookie('auth_session')
     resp.delete_cookie('auth')
     return resp
-
-@app.route('/login', methods=['POST'])
-def login_compat(): return redirect(f'/{LOGIN_PATH}')
 
 @app.route('/api/status', methods=['GET'])
 def api_status():
@@ -2499,7 +2711,15 @@ def save():
     d['config']['probe_token'] = request.form.get('cfg_probe_token', '').strip() or request.form.get('cfg_nezha_token', '').strip()
     d['config']['nezha_url'] = d['config']['probe_url']
     d['config']['nezha_token'] = d['config']['probe_token']
-    
+
+    # 新增安全设置保存
+    login_path_input = request.form.get('cfg_login_path', '').strip().lstrip('/')
+    clean_lp = re.sub(r'[^a-zA-Z0-9_\-]', '', login_path_input)
+    if clean_lp:
+        d['config']['login_path'] = clean_lp
+
+    d['config']['stealth_mode'] = (request.form.get('cfg_stealth_mode') == '1' or str(request.form.get('cfg_stealth_mode', '')).lower() in ('true', 'yes', 'on'))
+
     new_web_password = request.form.get('cfg_web_password', '').strip()
     if new_web_password:
         d['config']['web_password'] = new_web_password
@@ -2545,8 +2765,10 @@ def save():
     save_data(d)
     threading.Thread(target=run_sync_thread, kwargs={"include_ip_fetch": True}).start()
     
-    resp = make_response(redirect(f'/{LOGIN_PATH}?status=saved'))
+    resp = make_response(redirect('/?status=saved'))
     if new_web_password:
+        new_token = create_auth_token(new_web_password)
+        resp.set_cookie('auth_session', new_token, max_age=86400*30, httponly=True, samesite='Lax')
         resp.set_cookie('auth', new_web_password, max_age=86400*30, httponly=True, samesite='Lax')
     return resp
 
@@ -3200,5 +3422,29 @@ def sub():
 
 if __name__ == '__main__':
     if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR, exist_ok=True)
+    if len(sys.argv) > 1 and sys.argv[1] in ('passwd', 'password'):
+        print("==========================================================")
+        print("  CF 优选 Pro (cf-node-manager-plus) - 管理员密码维护")
+        print("==========================================================")
+        cur_d = load_data()
+        cur_pwd = cur_d.get('config', {}).get('web_password') or WEB_PASSWORD
+        cur_path = cur_d.get('config', {}).get('login_path') or LOGIN_PATH
+        cur_stealth = "已开启 (防扫描隐蔽模式)" if cur_d.get('config', {}).get('stealth_mode') else "未开启"
+        print(f"当前管理路径: /{cur_path}")
+        print(f"隐蔽模式状态: {cur_stealth}")
+        print(f"当前管理密码: {cur_pwd}")
+        try:
+            new_p = input("请输入新的管理员密码 (直接回车保持不变): ").strip()
+            if new_p:
+                if len(new_p) < 5:
+                    print("错误: 密码长度不能少于 5 位！")
+                    sys.exit(1)
+                cur_d.setdefault('config', {})['web_password'] = new_p
+                save_data(cur_d)
+                print(f"[ OK ] 管理员密码已成功重设为: {new_p}")
+        except (KeyboardInterrupt, EOFError):
+            print("\n操作已取消")
+        sys.exit(0)
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
