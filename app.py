@@ -1025,10 +1025,10 @@ def clash_to_internal(p):
     elif t in ['wireguard', 'awg']:
         node['type'] = 'wireguard'
         node['ip'] = p.get('ip', '10.8.0.2')
-        node['public-key'] = p.get('public-key', '')
-        node['private-key'] = p.get('private-key', '')
+        node['public-key'] = (p.get('public-key', '') or '').strip().replace(' ', '+')
+        node['private-key'] = (p.get('private-key', '') or '').strip().replace(' ', '+')
         if p.get('preshared-key'):
-            node['psk'] = p.get('preshared-key')
+            node['psk'] = (p.get('preshared-key') or '').strip().replace(' ', '+')
         awg_opt = p.get('amnezia-wg-option') or {}
         for k in ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4']:
             if k in awg_opt:
@@ -1077,6 +1077,71 @@ def parse_uri(uri):
     if not uri:
         return None
     try:
+        uri = uri.strip()
+        if uri.startswith(('awg://', 'wireguard://')):
+            try:
+                raw = uri
+                scheme, rest = raw.split('://', 1)
+                fragment = ''
+                if '#' in rest:
+                    rest, fragment = rest.split('#', 1)
+                    remark = urllib.parse.unquote(fragment)
+                else:
+                    remark = 'AmneziaWG'
+
+                query_dict = {}
+                if '?' in rest:
+                    rest, qstr = rest.split('?', 1)
+                    for part in qstr.split('&'):
+                        if not part: continue
+                        if '=' in part:
+                            k, v = part.split('=', 1)
+                            query_dict[k.lower()] = urllib.parse.unquote(v).strip().replace(' ', '+')
+                        else:
+                            query_dict[part.lower()] = ''
+
+                client_pri = ''
+                if '@' in rest:
+                    client_pri, rest = rest.rsplit('@', 1)
+                    client_pri = urllib.parse.unquote(client_pri).strip().replace(' ', '+')
+
+                server_host, port_str = split_host_port(rest, 51820)
+                try: port_val = int(port_str) if port_str else 51820
+                except: port_val = 51820
+
+                pub_key = (query_dict.get('publickey') or query_dict.get('public-key') or query_dict.get('pubkey') or '').strip().replace(' ', '+')
+                psk_key = (query_dict.get('psk') or query_dict.get('preshared-key') or '').strip().replace(' ', '+')
+                ip_val = (query_dict.get('address') or query_dict.get('ip') or '10.8.0.2').split('/')[0].strip()
+
+                def safe_int(v, default):
+                    try: return int(v)
+                    except: return default
+
+                return {
+                    'type': 'wireguard',
+                    'name': remark or 'AmneziaWG',
+                    'server': server_host,
+                    'port': port_val,
+                    'uuid': None,
+                    'password': None,
+                    'private-key': client_pri,
+                    'public-key': pub_key,
+                    'ip': ip_val,
+                    'psk': psk_key,
+                    'jc': safe_int(query_dict.get('jc'), 4),
+                    'jmin': safe_int(query_dict.get('jmin'), 50),
+                    'jmax': safe_int(query_dict.get('jmax'), 1000),
+                    's1': safe_int(query_dict.get('s1'), 15),
+                    's2': safe_int(query_dict.get('s2'), 20),
+                    'h1': safe_int(query_dict.get('h1'), 1),
+                    'h2': safe_int(query_dict.get('h2'), 2),
+                    'h3': safe_int(query_dict.get('h3'), 3),
+                    'h4': safe_int(query_dict.get('h4'), 4),
+                    'udp': True
+                }
+            except:
+                pass
+
         p = urllib.parse.urlparse(uri)
         q = urllib.parse.parse_qs(p.query)
 
@@ -1579,20 +1644,23 @@ def gen_clash(n, ip=None, port=None, name=None):
                     c['plugin-opts'] = {'mode': popts.get('mode', 'websocket'), 'host': popts.get('host', ''), 'path': popts.get('path', '/'), 'tls': True if 'tls' in popts else False, 'skip-cert-verify': True if 'skip-cert-verify' in popts else False, 'mux': False, 'headers': {'Host': popts.get('host', ''), 'User-Agent': 'Mozilla/5.0'}}
                 else: c['plugin-opts'] = popts
         elif n['type'] in ['wireguard', 'awg']:
+            pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
+            pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
+            psk_key = (n.get('psk') or '').strip().replace(' ', '+')
             c = {
                 "name": name or n['name'],
                 "type": "wireguard",
                 "server": ip or n['server'],
                 "port": int(port or n.get('port', 51820)),
                 "ip": n.get('ip', '10.8.0.2'),
-                "public-key": n.get('public-key', ''),
-                "private-key": n.get('private-key', ''),
+                "public-key": pub_key,
+                "private-key": pri_key,
                 "udp": True,
                 "remote-dns-resolve": True,
                 "dns": ["1.1.1.1", "8.8.8.8"]
             }
-            if n.get('psk'):
-                c["preshared-key"] = n['psk']
+            if psk_key:
+                c["preshared-key"] = psk_key
             if n.get('jc') is not None or n.get('s1') is not None:
                 c["amnezia-wg-option"] = {
                     "jc": int(n.get('jc', 4)),
@@ -1746,8 +1814,11 @@ def gen_uri(n, ip=None, port=None, name=None):
             uri += f"/?plugin={plugin_str}"
         return f"{uri}#{remark}"
     elif n['type'] in ['wireguard', 'awg']:
+        pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
+        pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
+        psk_key = (n.get('psk') or '').strip().replace(' ', '+')
         p = {
-            'publickey': n.get('public-key', ''),
+            'publickey': pub_key,
             'address': n.get('ip', '10.8.0.2'),
             'jc': str(n.get('jc', 4)),
             'jmin': str(n.get('jmin', 50)),
@@ -1759,10 +1830,10 @@ def gen_uri(n, ip=None, port=None, name=None):
             'h3': str(n.get('h3', 3)),
             'h4': str(n.get('h4', 4))
         }
-        if n.get('psk'):
-            p['psk'] = n['psk']
-        pri = n.get('private-key', '')
-        return f"awg://{pri}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
+        if psk_key:
+            p['psk'] = psk_key
+        quoted_pri = urllib.parse.quote(pri_key, safe='')
+        return f"awg://{quoted_pri}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     return None
 
 def gen_singbox(n, ip=None, port=None, name=None):
@@ -1922,17 +1993,20 @@ def gen_singbox(n, ip=None, port=None, name=None):
             return sb
 
         elif ntype in ['wireguard', 'awg']:
+            pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
+            pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
+            psk_key = (n.get('psk') or '').strip().replace(' ', '+')
             sb.update({
                 "type": "wireguard",
                 "tag": tag,
                 "server": server,
                 "server_port": port,
                 "local_address": [f"{n.get('ip', '10.8.0.2')}/32"],
-                "private_key": n.get('private-key', ''),
-                "peer_public_key": n.get('public-key', '')
+                "private_key": pri_key,
+                "peer_public_key": pub_key
             })
-            if n.get('psk'):
-                sb["pre_shared_key"] = n['psk']
+            if psk_key:
+                sb["pre_shared_key"] = psk_key
             if n.get('jc') is not None or n.get('s1') is not None:
                 sb.update({
                     "jc": int(n.get('jc', 4)),
