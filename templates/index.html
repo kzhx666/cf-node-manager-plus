@@ -1021,7 +1021,7 @@
         <div class="nav-actions">
             <button type="button" class="btn btn-ghost btn-sm" onclick="openBackupModal()" title="系统配置备份与还原">💾 备份还原</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTheme()" title="切换明暗主题">🌓 主题</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="openChangePasswordModal()" title="修改管理员密码">🔒 安全改密</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openChangePasswordModal()" title="设置私密管理入口、防扫描隐蔽模式与管理员密码">🛡️ 安全与私密入口</button>
             <a href="/logout" class="btn btn-ghost btn-sm" title="退出管理" style="color: var(--danger);">退出</a>
         </div>
     </div>
@@ -1683,31 +1683,65 @@
     </div>
 </div>
 
-<!-- 安全改密 Modal -->
+<!-- 安全设置与私密管理入口 Modal -->
 <div id="changePasswordModal" class="modal" onclick="this.style.display='none'">
-    <div class="modal-content" style="max-width: 440px;" onclick="event.stopPropagation()">
+    <div class="modal-content" style="max-width: 520px;" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <div class="card-title">🔒 修改管理员密码</div>
+            <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+                <span>🛡️ 面板安全防护与私密访问入口设置</span>
+            </div>
             <button type="button" class="btn-icon" onclick="document.getElementById('changePasswordModal').style.display='none'">×</button>
         </div>
         <div class="modal-body" style="padding: 20px;">
             <div id="cp-alert-box" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.82rem; color: #fca5a5;"></div>
-            <div style="margin-bottom: 14px;">
-                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">当前原密码</label>
-                <input type="password" id="cp-old-password" placeholder="请输入当前管理员密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+
+            <!-- 自定义私密管理入口路径 -->
+            <div style="background: rgba(99, 102, 241, 0.06); border: 1px dashed var(--primary); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <label style="font-size: 0.85rem; font-weight: 700; color: var(--text); display: block; margin-bottom: 6px;">🚪 自定义私密管理入口路径 (Login Path)</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span style="font-family: monospace; font-size: 1rem; color: var(--text-sec); font-weight: 700;">/</span>
+                    <input type="text" id="cp-login-path" value="{{ data.config.login_path or 'admin_login' }}" placeholder="例如: admin_login 或 my_secret_panel" style="flex: 1; padding: 9px 12px; font-size: 0.88rem; font-family: monospace; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text);">
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
+                    💡 修改后管理后台入口变更为: <code style="color:var(--primary); font-weight:600;">/<span id="cp-login-path-preview">{{ data.config.login_path or 'admin_login' }}</span></code> (仅支持英文字母、数字、下划线及连字符)
+                </div>
             </div>
-            <div style="margin-bottom: 14px;">
-                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">新管理密码 (不少于 5 位)</label>
-                <input type="password" id="cp-new-password" placeholder="请输入新的管理员密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+
+            <!-- 防扫描隐蔽模式 -->
+            <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="cp-stealth-mode" {% if data.config.stealth_mode %}checked{% endif %} style="accent-color: var(--primary); width: 18px; height: 18px; margin-top: 2px;">
+                    <div>
+                        <span style="font-size: 0.85rem; font-weight: 700; color: var(--text); display: block;">🛡️ 防扫描隐蔽模式 (Stealth Mode)</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 3px; line-height: 1.4;">
+                            开启后，未登录访客或自动化扫描器直接访问网站根目录 <code>/</code> 会直接返回 <strong>404 Not Found</strong>，彻底伪装成未部署面板的静默端口！
+                        </span>
+                    </div>
+                </label>
             </div>
-            <div style="margin-bottom: 8px;">
-                <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-sec); display: block; margin-bottom: 6px;">确认新密码</label>
-                <input type="password" id="cp-confirm-password" placeholder="请再次输入新密码..." style="width: 100%; padding: 10px 12px; font-size: 0.9rem;">
+
+            <!-- 管理员密码修改 -->
+            <div style="border-top: 1px solid var(--card-border); padding-top: 14px;">
+                <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-sec); margin-bottom: 8px;">🔑 修改管理员登录密码 (留空则保持当前密码不变)</div>
+                <div style="margin-bottom: 10px;">
+                    <label style="font-size: 0.78rem; color: var(--text-sec); display: block; margin-bottom: 4px;">当前原密码 (仅修改密码时需验证)</label>
+                    <input type="password" id="cp-old-password" placeholder="若修改密码请输入当前原密码..." style="width: 100%; padding: 8px 12px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text);">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label style="font-size: 0.78rem; color: var(--text-sec); display: block; margin-bottom: 4px;">新密码 (不少于5位)</label>
+                        <input type="password" id="cp-new-password" placeholder="输入新密码..." style="width: 100%; padding: 8px 12px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text);">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.78rem; color: var(--text-sec); display: block; margin-bottom: 4px;">再次确认新密码</label>
+                        <input type="password" id="cp-confirm-password" placeholder="重复新密码..." style="width: 100%; padding: 8px 12px; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text);">
+                    </div>
+                </div>
             </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('changePasswordModal').style.display='none'">取消</button>
-            <button type="button" id="btn-submit-change-pwd" class="btn btn-primary btn-sm" onclick="submitChangePassword()">确认修改密码</button>
+            <button type="button" id="btn-submit-change-pwd" class="btn btn-primary btn-sm" onclick="submitChangePassword()">💾 保存安全与入口配置</button>
         </div>
     </div>
 </div>
@@ -3319,10 +3353,19 @@ rules:
         if (p1) p1.value = '';
         if (p2) p2.value = '';
         if (p3) p3.value = '';
+
+        const lpInput = document.getElementById('cp-login-path');
+        const lpPreview = document.getElementById('cp-login-path-preview');
+        if (lpInput && lpPreview) {
+            lpInput.oninput = function() {
+                const clean = lpInput.value.replace(/[^a-zA-Z0-9_\-]/g, '');
+                lpPreview.textContent = clean || 'admin_login';
+            };
+        }
+
         const m = document.getElementById('changePasswordModal');
         if (m) {
             m.style.display = 'flex';
-            if (p1) setTimeout(() => p1.focus(), 50);
         }
     }
 
@@ -3331,27 +3374,40 @@ rules:
         const oldPwd = (document.getElementById('cp-old-password')?.value || '').trim();
         const newPwd = (document.getElementById('cp-new-password')?.value || '').trim();
         const confirmPwd = (document.getElementById('cp-confirm-password')?.value || '').trim();
+        const loginPath = (document.getElementById('cp-login-path')?.value || '').trim().replace(/^\/+/, '');
+        const stealthMode = !!(document.getElementById('cp-stealth-mode')?.checked);
         const btn = document.getElementById('btn-submit-change-pwd');
 
         if (alertBox) alertBox.style.display = 'none';
 
-        if (!oldPwd) {
-            if (alertBox) {
-                alertBox.textContent = '请输入当前原密码';
-                alertBox.style.display = 'block';
+        if (newPwd) {
+            if (!oldPwd) {
+                if (alertBox) {
+                    alertBox.textContent = '修改密码时，请输入当前原密码进行身份验证';
+                    alertBox.style.display = 'block';
+                }
+                return;
             }
-            return;
-        }
-        if (!newPwd || newPwd.length < 5) {
-            if (alertBox) {
-                alertBox.textContent = '新密码长度不能少于 5 个字符';
-                alertBox.style.display = 'block';
+            if (newPwd.length < 5) {
+                if (alertBox) {
+                    alertBox.textContent = '新密码长度不能少于 5 个字符';
+                    alertBox.style.display = 'block';
+                }
+                return;
             }
-            return;
+            if (newPwd !== confirmPwd) {
+                if (alertBox) {
+                    alertBox.textContent = '两次输入的新密码不一致，请核对后重试';
+                    alertBox.style.display = 'block';
+                }
+                return;
+            }
         }
-        if (newPwd !== confirmPwd) {
+
+        const cleanLoginPath = loginPath.replace(/[^a-zA-Z0-9_\-]/g, '');
+        if (!cleanLoginPath) {
             if (alertBox) {
-                alertBox.textContent = '两次输入的新密码不一致，请核对后重试';
+                alertBox.textContent = '私密管理入口路径不能为空！';
                 alertBox.style.display = 'block';
             }
             return;
@@ -3359,23 +3415,41 @@ rules:
 
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '正在提交...';
+            btn.textContent = '正在保存设置...';
+        }
+
+        const payload = {
+            login_path: cleanLoginPath,
+            stealth_mode: stealthMode
+        };
+        if (newPwd) {
+            payload.old_password = oldPwd;
+            payload.new_password = newPwd;
         }
 
         try {
-            const res = await fetch('/api/auth/change_password', {
+            const res = await fetch('/api/auth/update_security', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.status === 'success' || data.success) {
-                showToast('✅ 管理员密码修改成功！新凭据已生效', '🔑');
+                showToast(data.msg || '✅ 面板安全与私密入口配置已成功更新！', '🛡️');
                 const m = document.getElementById('changePasswordModal');
                 if (m) m.style.display = 'none';
+
+                const formLp = document.querySelector('input[name="cfg_login_path"]');
+                if (formLp) formLp.value = cleanLoginPath;
+                const formSm = document.querySelector('input[name="cfg_stealth_mode"]');
+                if (formSm) formSm.checked = stealthMode;
+
+                setTimeout(() => {
+                    showToast(`💡 提示：您的私密管理入口为 /${cleanLoginPath}，请牢记此路径`, '🚪');
+                }, 1200);
             } else {
                 if (alertBox) {
-                    alertBox.textContent = data.msg || data.message || '密码修改失败';
+                    alertBox.textContent = data.msg || data.message || '保存失败';
                     alertBox.style.display = 'block';
                 }
             }
@@ -3387,7 +3461,7 @@ rules:
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '确认修改密码';
+                btn.textContent = '💾 保存安全与入口配置';
             }
         }
     }

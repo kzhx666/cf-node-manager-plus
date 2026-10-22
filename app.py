@@ -1,6 +1,57 @@
 # -*- coding: utf-8 -*-
 import json, base64, urllib.parse, os, copy, datetime, re, random, threading, time, socket, shutil, glob, asyncio, logging, zipfile, io, binascii, ssl
 import hmac, hashlib, uuid, sys
+
+DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DATA_DIR = os.environ.get("DATA_DIR", "/app/data" if os.path.exists("/app/data") else DEFAULT_DATA_DIR)
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
+WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin")
+LOGIN_PATH = "admin_login"
+
+if len(sys.argv) > 1 and sys.argv[1] in ('passwd', 'password'):
+    print("==========================================================")
+    print("  CF 优选 Pro (cf-node-manager-plus) - 管理员密码维护")
+    print("==========================================================")
+    cur_d = {}
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                cur_d = json.load(f)
+        except Exception:
+            cur_d = {}
+    cfg = cur_d.setdefault('config', {})
+    cur_pwd = cfg.get('web_password') or WEB_PASSWORD
+    cur_path = cfg.get('login_path') or LOGIN_PATH
+    cur_stealth = "已开启 (防扫描隐蔽模式)" if cfg.get('stealth_mode') else "未开启"
+    print(f"当前私密管理入口: /{cur_path}")
+    print(f"隐蔽模式状态:     {cur_stealth}")
+    print(f"当前管理员密码:   {cur_pwd}")
+    print("----------------------------------------------------------")
+    try:
+        new_p = input("请输入新的管理员密码 (直接回车保持不变): ").strip()
+        if new_p:
+            if len(new_p) < 5:
+                print("错误: 密码长度不能少于 5 位！")
+                sys.exit(1)
+            cfg['web_password'] = new_p
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(DATA_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cur_d, f, indent=2, ensure_ascii=False)
+            print(f"[ OK ] 管理员密码已成功重设为: {new_p}")
+
+        new_path = input("请输入新的私密管理路径 (如: my_secret_panel，直接回车保持不变): ").strip().lstrip('/')
+        if new_path:
+            clean_path = re.sub(r'[^a-zA-Z0-9_\-]', '', new_path)
+            if clean_path:
+                cfg['login_path'] = clean_path
+                os.makedirs(DATA_DIR, exist_ok=True)
+                with open(DATA_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(cur_d, f, indent=2, ensure_ascii=False)
+                print(f"[ OK ] 管理路径已成功设置为: /{clean_path}")
+    except (KeyboardInterrupt, EOFError):
+        print("\n操作已取消")
+    sys.exit(0)
+
 from flask import Flask, request, render_template, render_template_string, Response, jsonify, send_file, redirect, make_response, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 from collections import deque
@@ -12,12 +63,7 @@ app = Flask(__name__)
 try: app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 except: pass
 
-WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin")
-LOGIN_PATH = "admin_login"
-DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-DATA_DIR = os.environ.get("DATA_DIR", "/app/data" if os.path.exists("/app/data") else DEFAULT_DATA_DIR)
 APP_VERSION = "v43.20-komari-nezha-automatch"
-DATA_FILE = os.path.join(DATA_DIR, "data.json")
 BACKUP_FILE = os.path.join(DATA_DIR, "data.json.bak")
 CACHE_FILE = os.path.join(DATA_DIR, "domain_cache.json")
 GEOIP_DB = os.path.join(DATA_DIR, "Country.mmdb")
@@ -2663,6 +2709,54 @@ def api_change_password():
     resp = make_response(jsonify({"status": "success", "msg": "管理员密码修改成功！"}))
     resp.set_cookie('auth_session', new_token, max_age=86400 * 30, httponly=True, samesite='Lax')
     resp.set_cookie('auth', new_pwd, max_age=86400 * 30, httponly=True, samesite='Lax')
+@app.route('/api/auth/update_security', methods=['POST'])
+def api_update_security():
+    if not is_authenticated():
+        return jsonify({"status": "error", "msg": "未登录或登录凭据已过期"}), 401
+
+    data = request.get_json(silent=True) if request.is_json else (request.form or {})
+    if not data:
+        data = {}
+
+    d = load_data()
+    cfg = d.setdefault('config', {})
+    current_pwd = get_current_password()
+
+    # Password update (optional)
+    old_pwd = str(data.get("old_password") or "").strip()
+    new_pwd = str(data.get("new_password") or "").strip()
+    new_token = None
+    if new_pwd:
+        if not hmac.compare_digest(old_pwd, current_pwd):
+            return jsonify({"status": "error", "msg": "当前原密码输入错误，无法修改密码"}), 400
+        if len(new_pwd) < 5:
+            return jsonify({"status": "error", "msg": "新密码长度不能少于 5 个字符"}), 400
+        cfg['web_password'] = new_pwd
+        current_pwd = new_pwd
+        new_token = create_auth_token(new_pwd)
+
+    # Login path update
+    if "login_path" in data:
+        raw_path = str(data["login_path"]).strip().lstrip('/')
+        clean_path = re.sub(r'[^a-zA-Z0-9_\-]', '', raw_path)
+        if clean_path:
+            cfg['login_path'] = clean_path
+
+    # Stealth mode update
+    if "stealth_mode" in data:
+        cfg['stealth_mode'] = bool(data["stealth_mode"])
+
+    save_data(d)
+
+    resp = make_response(jsonify({
+        "status": "success",
+        "msg": "面板安全防护与私密访问路径设置已成功更新！",
+        "login_path": cfg.get('login_path', LOGIN_PATH),
+        "stealth_mode": cfg.get('stealth_mode', False)
+    }))
+    if new_token:
+        resp.set_cookie('auth_session', new_token, max_age=86400 * 30, httponly=True, samesite='Lax')
+        resp.set_cookie('auth', current_pwd, max_age=86400 * 30, httponly=True, samesite='Lax')
     return resp
 
 @app.route('/logout')
@@ -3422,29 +3516,5 @@ def sub():
 
 if __name__ == '__main__':
     if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR, exist_ok=True)
-    if len(sys.argv) > 1 and sys.argv[1] in ('passwd', 'password'):
-        print("==========================================================")
-        print("  CF 优选 Pro (cf-node-manager-plus) - 管理员密码维护")
-        print("==========================================================")
-        cur_d = load_data()
-        cur_pwd = cur_d.get('config', {}).get('web_password') or WEB_PASSWORD
-        cur_path = cur_d.get('config', {}).get('login_path') or LOGIN_PATH
-        cur_stealth = "已开启 (防扫描隐蔽模式)" if cur_d.get('config', {}).get('stealth_mode') else "未开启"
-        print(f"当前管理路径: /{cur_path}")
-        print(f"隐蔽模式状态: {cur_stealth}")
-        print(f"当前管理密码: {cur_pwd}")
-        try:
-            new_p = input("请输入新的管理员密码 (直接回车保持不变): ").strip()
-            if new_p:
-                if len(new_p) < 5:
-                    print("错误: 密码长度不能少于 5 位！")
-                    sys.exit(1)
-                cur_d.setdefault('config', {})['web_password'] = new_p
-                save_data(cur_d)
-                print(f"[ OK ] 管理员密码已成功重设为: {new_p}")
-        except (KeyboardInterrupt, EOFError):
-            print("\n操作已取消")
-        sys.exit(0)
-
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
