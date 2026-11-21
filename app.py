@@ -1169,20 +1169,6 @@ def clash_to_internal(p):
             node['plugin'] = p.get('plugin')
             node['plugin_opts'] = p.get('plugin-opts', {})
 
-    elif t in ['wireguard', 'awg']:
-        node['type'] = 'wireguard'
-        node['ip'] = p.get('ip', '10.8.0.2')
-        node['public-key'] = (p.get('public-key', '') or '').strip().replace(' ', '+')
-        node['private-key'] = (p.get('private-key', '') or '').strip().replace(' ', '+')
-        if p.get('preshared-key'):
-            node['psk'] = (p.get('preshared-key') or '').strip().replace(' ', '+')
-        awg_opt = p.get('amnezia-wg-option') or {}
-        for k in ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4']:
-            if k in awg_opt:
-                node[k] = awg_opt[k]
-            elif k in p:
-                node[k] = p[k]
-            
     net = p.get('network', 'tcp')
     node['network'] = net
     if net == 'ws' or p.get('ws-opts'):
@@ -1196,19 +1182,12 @@ def clash_to_internal(p):
         node['network'] = 'grpc'
         grpc_opts = p.get('grpc-opts', {})
         node['grpc-name'] = grpc_opts.get('grpc-service-name', '')
-    elif net in ['xhttp', 'splithttp'] or p.get('xhttp-opts') or p.get('splithttp-opts'):
-        node['network'] = 'xhttp'
-        x_opts = p.get('xhttp-opts') or p.get('splithttp-opts') or {}
-        node['xhttp-path'] = x_opts.get('path', '/')
-        node['xhttp-host'] = x_opts.get('host', '') or p.get('servername', '')
-        node['xhttp-mode'] = x_opts.get('mode', 'packet-up')
-        node['alpn'] = p.get('alpn') or ['h3']
         
     return node
 
 def decode_sub_content(content):
     content = content.strip()
-    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://', 'awg://', 'wireguard://']):
+    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
         return parse_uri_list([content])
     try:
         if yaml and ("proxies:" in content or "Proxy:" in content):
@@ -1225,70 +1204,6 @@ def parse_uri(uri):
         return None
     try:
         uri = uri.strip()
-        if uri.startswith(('awg://', 'wireguard://')):
-            try:
-                raw = uri
-                scheme, rest = raw.split('://', 1)
-                fragment = ''
-                if '#' in rest:
-                    rest, fragment = rest.split('#', 1)
-                    remark = urllib.parse.unquote(fragment)
-                else:
-                    remark = 'AmneziaWG'
-
-                query_dict = {}
-                if '?' in rest:
-                    rest, qstr = rest.split('?', 1)
-                    for part in qstr.split('&'):
-                        if not part: continue
-                        if '=' in part:
-                            k, v = part.split('=', 1)
-                            query_dict[k.lower()] = urllib.parse.unquote(v).strip().replace(' ', '+')
-                        else:
-                            query_dict[part.lower()] = ''
-
-                client_pri = ''
-                if '@' in rest:
-                    client_pri, rest = rest.rsplit('@', 1)
-                    client_pri = urllib.parse.unquote(client_pri).strip().replace(' ', '+')
-
-                server_host, port_str = split_host_port(rest, 51820)
-                try: port_val = int(port_str) if port_str else 51820
-                except: port_val = 51820
-
-                pub_key = (query_dict.get('publickey') or query_dict.get('public-key') or query_dict.get('pubkey') or '').strip().replace(' ', '+')
-                psk_key = (query_dict.get('psk') or query_dict.get('preshared-key') or '').strip().replace(' ', '+')
-                ip_val = (query_dict.get('address') or query_dict.get('ip') or '10.8.0.2').split('/')[0].strip()
-
-                def safe_int(v, default):
-                    try: return int(v)
-                    except: return default
-
-                return {
-                    'type': 'wireguard',
-                    'name': remark or 'AmneziaWG',
-                    'server': server_host,
-                    'port': port_val,
-                    'uuid': None,
-                    'password': None,
-                    'private-key': client_pri,
-                    'public-key': pub_key,
-                    'ip': ip_val,
-                    'psk': psk_key,
-                    'jc': safe_int(query_dict.get('jc'), 4),
-                    'jmin': safe_int(query_dict.get('jmin'), 50),
-                    'jmax': safe_int(query_dict.get('jmax'), 1000),
-                    's1': safe_int(query_dict.get('s1'), 15),
-                    's2': safe_int(query_dict.get('s2'), 20),
-                    'h1': safe_int(query_dict.get('h1'), 1),
-                    'h2': safe_int(query_dict.get('h2'), 2),
-                    'h3': safe_int(query_dict.get('h3'), 3),
-                    'h4': safe_int(query_dict.get('h4'), 4),
-                    'udp': True
-                }
-            except:
-                pass
-
         p = urllib.parse.urlparse(uri)
         q = urllib.parse.parse_qs(p.query)
 
@@ -1339,14 +1254,6 @@ def parse_uri(uri):
                 b.update({'ws-path': q.get('path', ['/'])[0], 'ws-host': q.get('host', [''])[0]})
             elif b['network'] == 'grpc':
                 b['grpc-name'] = q.get('serviceName', [''])[0]
-            elif b['network'] in ['xhttp', 'splithttp']:
-                b['network'] = 'xhttp'
-                b.update({
-                    'xhttp-path': q.get('path', ['/'])[0],
-                    'xhttp-host': q.get('host', [''])[0] or q.get('sni', [''])[0],
-                    'xhttp-mode': q.get('mode', ['auto'])[0],
-                    'alpn': q.get('alpn', [''])[0].split(',') if q.get('alpn') else []
-                })
             return b
 
         elif p.scheme == "vmess":
@@ -1626,42 +1533,6 @@ def parse_uri(uri):
                 b['skip-cert-verify'] = True
             return b
 
-        elif p.scheme in ["awg", "wireguard"]:
-            try:
-                netloc = p.netloc or ""
-                client_pri = p.username or ""
-                server_part = p.hostname or ""
-                port_val = p.port or 51820
-                if not client_pri and "@" in netloc:
-                    client_pri, rest = netloc.rsplit("@", 1)
-                    client_pri = urllib.parse.unquote(client_pri)
-                    server_part, port_str = split_host_port(rest, 51820)
-                    port_val = int(port_str) if port_str else 51820
-
-                b.update({
-                    'type': 'wireguard',
-                    'name': name or 'AmneziaWG',
-                    'server': server_part,
-                    'port': int(port_val),
-                    'private-key': client_pri,
-                    'public-key': q.get('publickey', [''])[0] or q.get('public-key', [''])[0] or q.get('pubkey', [''])[0],
-                    'ip': q.get('address', ['10.8.0.2'])[0].split('/')[0],
-                    'psk': q.get('psk', [''])[0] or q.get('preshared-key', [''])[0],
-                    'jc': int(q.get('jc', [4])[0]) if q.get('jc') else 4,
-                    'jmin': int(q.get('jmin', [50])[0]) if q.get('jmin') else 50,
-                    'jmax': int(q.get('jmax', [1000])[0]) if q.get('jmax') else 1000,
-                    's1': int(q.get('s1', [15])[0]) if q.get('s1') else 15,
-                    's2': int(q.get('s2', [20])[0]) if q.get('s2') else 20,
-                    'h1': int(q.get('h1', [1])[0]) if q.get('h1') else 1,
-                    'h2': int(q.get('h2', [2])[0]) if q.get('h2') else 2,
-                    'h3': int(q.get('h3', [3])[0]) if q.get('h3') else 3,
-                    'h4': int(q.get('h4', [4])[0]) if q.get('h4') else 4,
-                    'udp': True
-                })
-                return b
-            except:
-                pass
-
     except:
         pass
     return None
@@ -1698,43 +1569,25 @@ def gen_clash(n, ip=None, port=None, name=None):
             if n.get('reality'): c.update({'reality-opts': {'public-key':n['pbk'], 'short-id':n['sid']}, 'client-fingerprint':n.get('fp','chrome')})
             else: c['client-fingerprint'] = 'chrome'
             if n.get('fp'): c['client-fingerprint'] = n['fp']
-            if n['network']=='ws': c['ws-opts'] = {'path':n.get('ws-path'), 'headers':{'Host':n.get('ws-host')}}
+            if n['network']=='ws':
+                ws_host = n.get('ws-host') or n.get('sni') or ''
+                c['ws-opts'] = {'path': n.get('ws-path') or '/', 'headers': {'Host': ws_host}}
             elif n['network']=='grpc': c['grpc-opts'] = {'grpc-service-name':n.get('grpc-name')}
-            elif n['network'] in ['xhttp', 'splithttp']:
-                c['network'] = 'xhttp'
-                c['xhttp-opts'] = {
-                    'path': n.get('xhttp-path') or n.get('ws-path') or '/',
-                    'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
-                    'mode': n.get('xhttp-mode') or 'auto'
-                }
-                eff_port = int(port or n.get('port') or 443)
-                if eff_port == 443:
-                    c['alpn'] = ['h3', 'h2', 'http/1.1']
-                else:
-                    c['alpn'] = ['h2', 'http/1.1']
         elif n['type'] == 'vmess':
             c.update({"uuid":n['uuid'], "alterId":n['alterId'], "cipher":"auto", "network":n['network']})
             if n.get('tls'): c['tls']=True; c['servername']=n.get('sni')
             else: c['tls']=False
-            if n['network']=='ws': c['ws-opts'] = {'path':n.get('ws-path'), 'headers':{'Host':n.get('ws-host')}}
+            if n['network']=='ws':
+                ws_host = n.get('ws-host') or n.get('sni') or ''
+                c['ws-opts'] = {'path': n.get('ws-path') or '/', 'headers': {'Host': ws_host}}
             elif n['network']=='grpc': c['grpc-opts'] = {'grpc-service-name':n.get('grpc-name')}
-            elif n['network'] in ['xhttp', 'splithttp']:
-                c['network'] = 'xhttp'
-                c['xhttp-opts'] = {
-                    'path': n.get('xhttp-path') or n.get('ws-path') or '/',
-                    'host': n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or '',
-                    'mode': n.get('xhttp-mode') or 'auto'
-                }
-                eff_port = int(port or n.get('port') or 443)
-                if eff_port == 443:
-                    c['alpn'] = ['h3', 'h2', 'http/1.1']
-                else:
-                    c['alpn'] = ['h2', 'http/1.1']
         elif n['type'] == 'trojan':
             c.update({"password":n['password'], "network":n.get('network','tcp')})
             if n.get('sni'): c['sni'] = n['sni']
             if n.get('alpn'): c['alpn'] = n['alpn'] 
-            if n.get('network')=='ws': c['ws-opts'] = {'path':n.get('ws-path'), 'headers':{'Host':n.get('ws-host')}}
+            if n.get('network')=='ws':
+                ws_host = n.get('ws-host') or n.get('sni') or ''
+                c['ws-opts'] = {'path': n.get('ws-path') or '/', 'headers': {'Host': ws_host}}
             elif n.get('network')=='grpc': c['grpc-opts'] = {'grpc-service-name':n.get('grpc-name')}
         elif n['type'] == 'hysteria2':
             c.update({"password": n.get('password',''), "sni": n.get('sni',''), "alpn": get_alpn_list(n)})
@@ -1749,8 +1602,15 @@ def gen_clash(n, ip=None, port=None, name=None):
                     parts = [str(port)] + parts
                 c['ports'] = join_ports_spec(parts)
         elif n['type'] == 'tuic':
-            c.update({"uuid":n['uuid'], "password":n['password'], "sni":n.get('sni',''), 
-                      "alpn": get_alpn_list(n)})
+            c.update({
+                "uuid": n['uuid'],
+                "password": n['password'],
+                "version": 5,
+                "sni": n.get('sni', ''),
+                "alpn": get_alpn_list(n),
+                "congestion-controller": n.get('congestion_control', 'bbr'),
+                "reduce-rtt": True
+            })
             if n.get('udp_relay_mode'): c['udp-relay-mode'] = n['udp_relay_mode']
             if sni and server_str != sni: c['skip-cert-verify'] = True
         elif n['type'] == 'anytls':
@@ -1790,39 +1650,6 @@ def gen_clash(n, ip=None, port=None, name=None):
                 if n['plugin'] == 'v2ray-plugin':
                     c['plugin-opts'] = {'mode': popts.get('mode', 'websocket'), 'host': popts.get('host', ''), 'path': popts.get('path', '/'), 'tls': True if 'tls' in popts else False, 'skip-cert-verify': True if 'skip-cert-verify' in popts else False, 'mux': False, 'headers': {'Host': popts.get('host', ''), 'User-Agent': 'Mozilla/5.0'}}
                 else: c['plugin-opts'] = popts
-        elif n['type'] in ['wireguard', 'awg']:
-            pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
-            pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
-            psk_key = (n.get('psk') or '').strip().replace(' ', '+')
-            c = {
-                "name": name or n['name'],
-                "type": "wireguard",
-                "server": ip or n['server'],
-                "port": int(port or n.get('port', 51820)),
-                "ip": n.get('ip', '10.8.0.2'),
-                "public-key": pub_key,
-                "private-key": pri_key,
-                "allowed-ips": ["0.0.0.0/0", "::/0"],
-                "udp": True,
-                "remote-dns-resolve": False,
-                "dns": ["1.1.1.1", "8.8.8.8"]
-            }
-            if psk_key:
-                c["pre-shared-key"] = psk_key
-                c["preshared-key"] = psk_key
-            if n.get('jc') is not None or n.get('s1') is not None:
-                c["amnezia-wg-option"] = {
-                    "jc": int(n.get('jc', 4)),
-                    "jmin": int(n.get('jmin', 50)),
-                    "jmax": int(n.get('jmax', 1000)),
-                    "s1": int(n.get('s1', 15)),
-                    "s2": int(n.get('s2', 20)),
-                    "h1": int(n.get('h1', 1)),
-                    "h2": int(n.get('h2', 2)),
-                    "h3": int(n.get('h3', 3)),
-                    "h4": int(n.get('h4', 4))
-                }
-            return c
         return c
     except: return None
 
@@ -1855,14 +1682,6 @@ def gen_uri(n, ip=None, port=None, name=None):
             p.update({'path': n.get('ws-path', '/'), 'host': n.get('ws-host', '')})
         elif n.get('network') == 'grpc':
             p['serviceName'] = n.get('grpc-name', '')
-        elif n.get('network') in ['xhttp', 'splithttp']:
-            p['type'] = 'xhttp'
-            p['path'] = n.get('xhttp-path') or n.get('ws-path') or '/'
-            p['host'] = n.get('xhttp-host') or n.get('ws-host') or n.get('sni') or ''
-            p['mode'] = n.get('xhttp-mode') or 'auto'
-            eff_port = int(port or n.get('port') or 443)
-            if eff_port == 443 and n.get('alpn') and 'h3' in n.get('alpn'):
-                p['alpn'] = 'h3,h2'
         return f"vless://{n['uuid']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'vmess':
         j = {"v":"2", "ps":name or n['name'], "add":server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
@@ -1962,27 +1781,6 @@ def gen_uri(n, ip=None, port=None, name=None):
             plugin_str = urllib.parse.quote(f"{n['plugin']};{opt_str}")
             uri += f"/?plugin={plugin_str}"
         return f"{uri}#{remark}"
-    elif n['type'] in ['wireguard', 'awg']:
-        pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
-        pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
-        psk_key = (n.get('psk') or '').strip().replace(' ', '+')
-        p = {
-            'publickey': pub_key,
-            'address': n.get('ip', '10.8.0.2'),
-            'jc': str(n.get('jc', 4)),
-            'jmin': str(n.get('jmin', 50)),
-            'jmax': str(n.get('jmax', 1000)),
-            's1': str(n.get('s1', 15)),
-            's2': str(n.get('s2', 20)),
-            'h1': str(n.get('h1', 1)),
-            'h2': str(n.get('h2', 2)),
-            'h3': str(n.get('h3', 3)),
-            'h4': str(n.get('h4', 4))
-        }
-        if psk_key:
-            p['psk'] = psk_key
-        quoted_pri = urllib.parse.quote(pri_key, safe='')
-        return f"awg://{quoted_pri}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     return None
 
 def gen_singbox(n, ip=None, port=None, name=None):
@@ -2037,16 +1835,6 @@ def gen_singbox(n, ip=None, port=None, name=None):
                 if n.get('grpc-name'):
                     grpc["service_name"] = n['grpc-name']
                 return grpc
-            elif net in ['xhttp', 'splithttp']:
-                xh = {
-                    "type": "xhttp",
-                    "path": n.get('xhttp-path') or n.get('ws-path') or "/",
-                    "mode": n.get('xhttp-mode') or "packet-up"
-                }
-                host_val = n.get('xhttp-host') or n.get('ws-host')
-                if host_val:
-                    xh["headers"] = {"Host": host_val}
-                return xh
             return None
 
         sb = {"type": ntype, "tag": tag, "server": server}
@@ -2054,8 +1842,7 @@ def gen_singbox(n, ip=None, port=None, name=None):
         if ntype == 'vless':
             sb.update({"server_port": port, "uuid": n['uuid']})
             if n.get('flow'): sb["flow"] = n['flow']
-            def_alpn = ['h3'] if n.get('network') in ['xhttp', 'splithttp'] else None
-            if n.get('tls') or n.get('reality'): sb["tls"] = build_tls(default_alpn=def_alpn)
+            if n.get('tls') or n.get('reality'): sb["tls"] = build_tls()
             trans = build_transport()
             if trans: sb["transport"] = trans
             return sb
@@ -2076,14 +1863,18 @@ def gen_singbox(n, ip=None, port=None, name=None):
 
         elif ntype == 'hysteria2':
             sb.update({
-                "server_port": port,
                 "password": n.get('password', '') or n.get('auth', '')
             })
+            has_server_ports = False
             if n.get('ports'):
                 parts = parse_ports_spec(n.get('ports'))
-                range_parts = [pp.replace(':', '-') for pp in parts if '-' in pp]
+                range_parts = [pp.replace('-', ':') for pp in parts if '-' in pp or ':' in pp]
                 if range_parts:
                     sb['server_ports'] = range_parts
+                    sb['hop_interval'] = '30s'
+                    has_server_ports = True
+            if not has_server_ports:
+                sb['server_port'] = port
             sb["tls"] = build_tls(allow_utls=False, default_alpn=['h3'])
             obfs_pass = n.get('obfs_password') or n.get('obfs-password') or ''
             if n.get('obfs') and obfs_pass:
@@ -2139,35 +1930,6 @@ def gen_singbox(n, ip=None, port=None, name=None):
             sb.update({"server_port": port, "username": n.get('username', ''), "password": n.get('password', '')})
             sb["tls"] = build_tls()
             if n.get('quic'): sb['network'] = 'quic'
-            return sb
-
-        elif ntype in ['wireguard', 'awg']:
-            pub_key = (n.get('public-key') or '').strip().replace(' ', '+')
-            pri_key = (n.get('private-key') or '').strip().replace(' ', '+')
-            psk_key = (n.get('psk') or '').strip().replace(' ', '+')
-            sb.update({
-                "type": "wireguard",
-                "tag": tag,
-                "server": server,
-                "server_port": port,
-                "local_address": [f"{n.get('ip', '10.8.0.2')}/32"],
-                "private_key": pri_key,
-                "peer_public_key": pub_key
-            })
-            if psk_key:
-                sb["pre_shared_key"] = psk_key
-            if n.get('jc') is not None or n.get('s1') is not None:
-                sb.update({
-                    "jc": int(n.get('jc', 4)),
-                    "jmin": int(n.get('jmin', 50)),
-                    "jmax": int(n.get('jmax', 1000)),
-                    "s1": int(n.get('s1', 15)),
-                    "s2": int(n.get('s2', 20)),
-                    "h1": int(n.get('h1', 1)),
-                    "h2": int(n.get('h2', 2)),
-                    "h3": int(n.get('h3', 3)),
-                    "h4": int(n.get('h4', 4))
-                })
             return sb
 
         return None
@@ -2300,7 +2062,7 @@ async def async_process_subs():
                 for line in lines:
                     if line.startswith('http'):
                         http_links.append(line)
-                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://', 'awg://', 'wireguard://']):
+                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
                         node = parse_uri(line)
                         if node: 
                             node['_tag'] = tag; node['_opt'] = enabled; direct_nodes.append(node)
@@ -2470,8 +2232,8 @@ async def async_process_subs():
                     ports_fp = ''
                     if n.get('ports'): ports_fp = str(n.get('ports'))
                     elif n.get('server_ports'): ports_fp = ','.join([str(x) for x in n.get('server_ports')])
-                    path_fp = n.get('ws-path') or n.get('grpc-name') or n.get('xhttp-path') or ''
-                    host_fp = n.get('ws-host') or n.get('xhttp-host') or n.get('sni') or ''
+                    path_fp = n.get('ws-path') or n.get('grpc-name') or ''
+                    host_fp = n.get('ws-host') or n.get('sni') or ''
                     name_fp = n.get('name') or ''
                     tag_fp = n.get('_tag') or ''
                     fp = f"{n.get('type')}|{n.get('uuid','')}|{n.get('password','')}|{n.get('server')}|{n.get('port')}|{ports_fp}|{path_fp}|{host_fp}|{name_fp}|{tag_fp}"
@@ -2972,7 +2734,7 @@ def api_push_nodes():
                 continue
 
             # 🌟 始终计算是否为 Argo 节点
-            is_argo = ('argo' in tag.lower()) or ('argo' in nodes_str.lower())
+            is_argo = ('argo' in tag.lower()) or ('优选' in tag) or ('argo' in nodes_str.lower())
 
             # 优选开关解析：优先显式传参；若未传，则根据节点/tag智能判断：argo 默认 True (开启优选)，非 argo 默认 False (关闭优选)
             item_enabled = s_item.get('enabled')
@@ -3012,9 +2774,11 @@ def api_push_nodes():
                 }
                 # 如果是 Argo 独立订阅，自动尝试继承同 VPS 主订阅已有的探针与配额
                 if is_argo:
-                    base_tag = re.sub(r'[\-_\s]*argo[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
+                    base_tag = re.sub(r'[\-_\s]*(argo|优选|本机|直连)[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
                     for s in (items_to_insert + subs):
-                        if s.get('tag', '').strip() == base_tag or s.get('tag', '').strip().lower() == base_tag.lower():
+                        s_tag = s.get('tag', '').strip()
+                        s_base = re.sub(r'[\-_\s]*(argo|优选|本机|直连)[\-_\s]*', '', s_tag, flags=re.IGNORECASE).strip()
+                        if s_tag == base_tag or s_tag.lower() == base_tag.lower() or (base_tag and s_base.lower() == base_tag.lower()):
                             if s.get('probe_id'):
                                 new_sub['probe_id'] = s.get('probe_id')
                                 new_sub['nezha_id'] = s.get('probe_id')
@@ -3424,7 +3188,7 @@ def sub():
         target_ips = [None]
         if not raw_mode:
             is_opt_enable = n.get('_opt', True)
-            is_protocol_support = n['type'] in ['vless', 'vmess', 'trojan'] and n.get('network') in ['ws', 'grpc', 'xhttp', 'splithttp']
+            is_protocol_support = n['type'] in ['vless', 'vmess', 'trojan'] and n.get('network') in ['ws', 'grpc']
             if n.get('reality'): is_protocol_support = False
             
             if is_opt_enable and is_protocol_support and ips:
@@ -3447,7 +3211,7 @@ def sub():
             node_name = ensure_node_flag(node_name, tag, n.get('server', ''))
             
             obj = None
-            if flag == 'clash': obj = gen_clash(n, ip, port, node_name)
+            if flag in ['clash', 'openclash', 'meta']: obj = gen_clash(n, ip, port, node_name)
             elif flag == 'singbox': obj = gen_singbox(n, ip, port, node_name)
             else: obj = gen_uri(n, ip, port, node_name)
             if obj: final_list.append(obj)
@@ -3472,7 +3236,7 @@ def sub():
 
         if "#PLACEHOLDER#" not in tpl: tpl += "\nproxies:\n#PLACEHOLDER#"
         y_str_indented = "\n".join(["  " + l for l in y_str.splitlines()])
-        names = "\n".join([f"      - {n['name']}" for n in final_list])
+        names = "\n".join([f"      - {json.dumps(n['name'], ensure_ascii=False)}" for n in final_list])
         resp_data = tpl.replace("#PLACEHOLDER#", y_str_indented).replace("#PLACEHOLDER_NAMES#", names)
         headers = {'Content-Type': 'text/yaml; charset=utf-8', 'Content-Disposition': f'inline; filename={filename}.yaml'}
     elif flag == 'singbox':

@@ -1001,8 +1001,7 @@
         .proto-hysteria2, .proto-hy2 { background: rgba(239, 68, 68, 0.2); color: #f87171; }
         .proto-tuic { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
         .proto-ss { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-        .proto-xhttp, .proto-splithttp { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
-        .proto-awg, .proto-wireguard { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
+        .proto-ws { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
         .proto-other { background: rgba(156, 163, 175, 0.2); color: #d1d5db; }
     </style>
 </head>
@@ -1473,7 +1472,7 @@
                     <div class="export-card-header">
                         <div class="export-title" style="color: var(--primary);">
                             <span>⚡ OpenClash / Clash.Meta / Mihomo 订阅</span>
-                            <span class="export-badge">已原生适配 xHTTP(H3/UDP) / Reality / Hy2 / TUIC</span>
+                            <span class="export-badge">已原生适配 Reality / Hy2 / TUIC / Argo(VLESS+WS)</span>
                         </div>
                     </div>
                     <div class="export-input-row">
@@ -3009,8 +3008,8 @@
     }
 
     function getNodeCategory(n) {
-        if (n.network === 'xhttp' || n.network === 'splithttp') return 'XHTTP';
-        if (n.type === 'wireguard' || n.type === 'awg') return 'AWG';
+        if (n.type === 'vless' && n.reality) return 'REALITY';
+        if (n.type === 'vless' && n.network === 'ws') return 'VLESS-WS';
         return (n.type || 'other').toUpperCase();
     }
 
@@ -3058,12 +3057,16 @@
             const realIndex = cachedNodes.indexOf(n);
             let protoClass = `proto-${(n.type || 'other').toLowerCase()}`;
             let badgeText = n.type || '未知';
-            if (n.network === 'xhttp' || n.network === 'splithttp') {
-                protoClass = 'proto-xhttp';
-                badgeText = 'xHTTP (H3)';
-            } else if (n.type === 'wireguard' || n.type === 'awg') {
-                protoClass = 'proto-awg';
-                badgeText = 'AmneziaWG';
+            if (n.type === 'vless' && n.reality) {
+                protoClass = 'proto-vless';
+                badgeText = 'VLESS-Reality';
+            } else if (n.type === 'vless' && n.network === 'ws') {
+                protoClass = 'proto-ws';
+                badgeText = 'VLESS-WS (Argo)';
+            } else if (n.type === 'hysteria2') {
+                badgeText = 'Hysteria2';
+            } else if (n.type === 'tuic') {
+                badgeText = 'TUIC v5';
             }
             tbody.innerHTML += `
                 <tr style="border-bottom: 1px solid var(--card-border);">
