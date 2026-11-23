@@ -1,6 +1,19 @@
 # -*- coding: utf-8 -*-
 import json, base64, urllib.parse, os, copy, datetime, re, random, threading, time, socket, shutil, glob, asyncio, logging, zipfile, io, binascii, ssl
-import hmac, hashlib, uuid, sys
+import hmac, hashlib, uuid, sys, ipaddress
+
+CF_HTTP_PORTS = {80, 8080, 8880, 2052, 2082, 2086, 2095}
+
+def is_ipv6_host(host):
+    h = str(host or '').strip()
+    if h.startswith('[') and h.endswith(']'):
+        h = h[1:-1]
+    if not h:
+        return False
+    try:
+        return isinstance(ipaddress.ip_address(h), ipaddress.IPv6Address)
+    except Exception:
+        return ':' in h
 
 DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data" if os.path.exists("/app/data") else DEFAULT_DATA_DIR)
@@ -244,6 +257,7 @@ def load_data():
             "web_password": WEB_PASSWORD,
             "login_path": LOGIN_PATH,
             "stealth_mode": False,
+            "argo_80": False,
             "custom_groups": "snip, work",
             "probe_type": "komari",
             "probe_url": "",
@@ -267,6 +281,7 @@ def load_data():
                 if "web_password" not in d["config"]: d["config"]["web_password"] = WEB_PASSWORD
                 if "login_path" not in d["config"]: d["config"]["login_path"] = LOGIN_PATH
                 if "stealth_mode" not in d["config"]: d["config"]["stealth_mode"] = False
+                if "argo_80" not in d["config"]: d["config"]["argo_80"] = False
                 if "probe_type" not in d["config"]: d["config"]["probe_type"] = "komari"
                 if "probe_url" not in d["config"]: d["config"]["probe_url"] = d["config"].get("nezha_url", "")
                 if "probe_token" not in d["config"]: d["config"]["probe_token"] = d["config"].get("nezha_token", "")
@@ -1169,6 +1184,17 @@ def clash_to_internal(p):
             node['plugin'] = p.get('plugin')
             node['plugin_opts'] = p.get('plugin-opts', {})
 
+    elif t == 'snell':
+        node['psk'] = p.get('psk', '')
+        try: node['version'] = int(p.get('version', 6))
+        except: node['version'] = 6
+        if p.get('mode'): node['mode'] = str(p.get('mode'))
+        obfs_opts = p.get('obfs-opts') or {}
+        if isinstance(obfs_opts, dict):
+            if obfs_opts.get('mode'): node['obfs'] = obfs_opts.get('mode')
+            if obfs_opts.get('host'): node['obfs_host'] = obfs_opts.get('host')
+        node['udp'] = bool(p.get('udp', True))
+
     net = p.get('network', 'tcp')
     node['network'] = net
     if net == 'ws' or p.get('ws-opts'):
@@ -1187,7 +1213,7 @@ def clash_to_internal(p):
 
 def decode_sub_content(content):
     content = content.strip()
-    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
+    if ('\n' not in content and '\r' not in content) and any(content.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'snell://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
         return parse_uri_list([content])
     try:
         if yaml and ("proxies:" in content or "Proxy:" in content):
@@ -1368,6 +1394,18 @@ def parse_uri(uri):
                 elif q.get('client-fingerprint'): b['fp'] = q.get('client-fingerprint', ['chrome'])[0]
                 is_insecure = q.get('allow_insecure', ['0'])[0] == '1' or q.get('allowInsecure', ['0'])[0] == '1' or q.get('insecure', ['0'])[0] == '1'
                 if is_insecure: b['skip-cert-verify'] = True
+                return b
+            except:
+                pass
+
+        elif p.scheme == "snell":
+            try:
+                psk = urllib.parse.unquote(p.username or '') or q.get('psk', [''])[0] or urllib.parse.unquote(p.password or '')
+                ver = int(float(q.get('version', ['6'])[0] or 6))
+                mode = q.get('mode', ['default'])[0] or 'default'
+                b.update({'type': 'snell', 'server': server, 'port': int(base_port or q.get('port', [443])[0] or 443), 'psk': psk, 'version': ver, 'mode': mode, 'udp': True})
+                if q.get('obfs'): b['obfs'] = q.get('obfs', [''])[0]
+                if q.get('obfs-host'): b['obfs_host'] = q.get('obfs-host', [''])[0]
                 return b
             except:
                 pass
@@ -1650,12 +1688,27 @@ def gen_clash(n, ip=None, port=None, name=None):
                 if n['plugin'] == 'v2ray-plugin':
                     c['plugin-opts'] = {'mode': popts.get('mode', 'websocket'), 'host': popts.get('host', ''), 'path': popts.get('path', '/'), 'tls': True if 'tls' in popts else False, 'skip-cert-verify': True if 'skip-cert-verify' in popts else False, 'mux': False, 'headers': {'Host': popts.get('host', ''), 'User-Agent': 'Mozilla/5.0'}}
                 else: c['plugin-opts'] = popts
+        elif n['type'] == 'snell':
+            ver = int(n.get('version', 6))
+            c.update({
+                'type': 'snell',
+                'psk': n.get('psk', ''),
+                'version': ver,
+                'udp': True
+            })
+            if ver >= 6 and n.get('mode'):
+                c['mode'] = n['mode']
+            if n.get('obfs'):
+                c['obfs-opts'] = {'mode': n['obfs'], 'host': n.get('obfs_host', '')}
         return c
     except: return None
 
 def gen_uri(n, ip=None, port=None, name=None):
     if not isinstance(n, dict) or 'type' not in n: return None
-    server = ip or n['server']; port = str(port or n['port']); remark = urllib.parse.quote(name or n['name'])
+    if n['type'] == 'snell': return None
+    raw_server = ip or n['server']
+    server = f"[{raw_server}]" if (':' in str(raw_server) and not str(raw_server).startswith('[')) else raw_server
+    port = str(port or n['port']); remark = urllib.parse.quote(name or n['name'])
     if n['type'] == 'vless':
         sec = 'reality' if n.get('reality') else ('tls' if n.get('tls') else 'none')
         p = {'type': n.get('network', 'tcp'), 'security': sec, 'encryption': n.get('encryption', 'none')}
@@ -1684,7 +1737,7 @@ def gen_uri(n, ip=None, port=None, name=None):
             p['serviceName'] = n.get('grpc-name', '')
         return f"vless://{n['uuid']}@{server}:{port}?{urllib.parse.urlencode(p)}#{remark}"
     elif n['type'] == 'vmess':
-        j = {"v":"2", "ps":name or n['name'], "add":server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
+        j = {"v":"2", "ps":name or n['name'], "add":raw_server, "port":port, "id":n['uuid'], "aid":n.get('alterId',0), "scy":"auto", "net":n['network'], "type":"none"}
         if n.get('tls'): j['tls']="tls"; j['host']=n.get('sni'); j['sni']=n.get('sni')
         else: j['tls']=""; j['host']=n.get('ws-host')
         if n['network']=='ws': j['path']=n.get('ws-path','/'); j['host']=n.get('ws-host','')
@@ -1932,6 +1985,18 @@ def gen_singbox(n, ip=None, port=None, name=None):
             if n.get('quic'): sb['network'] = 'quic'
             return sb
 
+        elif ntype == 'snell':
+            ver = int(n.get('version', 6))
+            sb_ver = 6 if ver >= 6 else 4
+            sb.update({"server_port": port, "version": sb_ver, "psk": n.get('psk', '')})
+            if sb_ver == 6 and n.get('mode'):
+                sb['mode'] = n['mode']
+            elif sb_ver == 4 and n.get('obfs'):
+                sb['obfs_mode'] = n['obfs']
+                if n.get('obfs_host'):
+                    sb['obfs_host'] = n['obfs_host']
+            return sb
+
         return None
     except:
         return None
@@ -2062,12 +2127,20 @@ async def async_process_subs():
                 for line in lines:
                     if line.startswith('http'):
                         http_links.append(line)
-                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
+                    elif any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://', 'tuic://', 'anytls://', 'snell://', 'shadowtls://', 'stls://', 'naive+https://', 'naive+quic://', 'naive://']):
                         node = parse_uri(line)
                         if node: 
                             node['_tag'] = tag; node['_opt'] = enabled; direct_nodes.append(node)
                     else:
                         raw_content_parts.append(line)
+
+                if isinstance(sub_item.get('nodes_json'), list):
+                    for jn in sub_item.get('nodes_json'):
+                        if isinstance(jn, dict) and jn.get('type'):
+                            node_copy = copy.deepcopy(jn)
+                            node_copy['_tag'] = tag
+                            node_copy['_opt'] = enabled
+                            direct_nodes.append(node_copy)
 
                 async def fetch_job(url):
                     async with sem:
@@ -2582,6 +2655,7 @@ def save():
         d['config']['login_path'] = clean_lp
 
     d['config']['stealth_mode'] = (request.form.get('cfg_stealth_mode') == '1' or str(request.form.get('cfg_stealth_mode', '')).lower() in ('true', 'yes', 'on'))
+    d['config']['argo_80'] = (request.form.get('cfg_argo_80') == '1' or str(request.form.get('cfg_argo_80', '')).lower() in ('true', 'yes', 'on'))
 
     new_web_password = request.form.get('cfg_web_password', '').strip()
     if new_web_password:
@@ -2701,10 +2775,12 @@ def api_push_nodes():
         if not isinstance(sources_input, list) or not sources_input:
             single_tag = str(data_payload.get('tag', '')).strip()
             single_nodes = data_payload.get('nodes', '')
-            if single_tag and single_nodes:
+            single_nodes_json = data_payload.get('nodes_json')
+            if single_tag and (single_nodes or (isinstance(single_nodes_json, list) and single_nodes_json)):
                 sources_input = [{
                     "tag": single_tag,
                     "nodes": single_nodes,
+                    "nodes_json": single_nodes_json,
                     "enabled": data_payload.get('enabled')
                 }]
             else:
@@ -2721,22 +2797,29 @@ def api_push_nodes():
         for s_item in sources_input:
             tag = str(s_item.get('tag', '')).strip()
             raw_nodes = s_item.get('nodes', '')
-            if not tag or not raw_nodes:
+            raw_nodes_json = s_item.get('nodes_json')
+            if not tag or (not raw_nodes and not (isinstance(raw_nodes_json, list) and raw_nodes_json)):
                 continue
                 
             if isinstance(raw_nodes, list):
                 nodes_list = [str(x).strip() for x in raw_nodes if str(x).strip()]
                 nodes_str = "\n".join(nodes_list)
             else:
-                nodes_str = str(raw_nodes).strip()
+                nodes_str = str(raw_nodes or '').strip()
                 nodes_list = [x.strip() for x in nodes_str.splitlines() if x.strip()]
-            if not nodes_str:
+            valid_json_nodes = [x for x in raw_nodes_json if isinstance(x, dict) and x.get('type')] if isinstance(raw_nodes_json, list) else []
+            if not nodes_str and not valid_json_nodes:
                 continue
 
-            # 🌟 始终计算是否为 Argo 节点
-            is_argo = ('argo' in tag.lower()) or ('优选' in tag) or ('argo' in nodes_str.lower())
+            # 仅在传输层包含 ws/grpc 时才允许启发式判定为 Argo/优选节点
+            parsed_preview = parse_uri_list(nodes_list) + valid_json_nodes
+            has_cf_transport = any(
+                isinstance(pn, dict) and pn.get('type') in ('vless', 'vmess', 'trojan') and pn.get('network') in ('ws', 'grpc') and not pn.get('reality')
+                for pn in parsed_preview
+            )
+            is_argo = has_cf_transport and (('argo' in tag.lower()) or ('优选' in tag) or ('argo' in nodes_str.lower()))
 
-            # 优选开关解析：优先显式传参；若未传，则根据节点/tag智能判断：argo 默认 True (开启优选)，非 argo 默认 False (关闭优选)
+            # 优选开关解析：优先显式传参；若未传，则仅对含 ws/grpc 的 Argo 节点默认开启优选
             item_enabled = s_item.get('enabled')
             if item_enabled is not None:
                 if isinstance(item_enabled, str):
@@ -2757,9 +2840,15 @@ def api_push_nodes():
                 existing_sub = subs.pop(found_idx)
                 if replace:
                     existing_sub['url'] = nodes_str
+                    if valid_json_nodes:
+                        existing_sub['nodes_json'] = valid_json_nodes
+                    else:
+                        existing_sub.pop('nodes_json', None)
                 else:
                     old_url = existing_sub.get('url', '').strip()
                     existing_sub['url'] = f"{old_url}\n{nodes_str}".strip()
+                    if valid_json_nodes:
+                        existing_sub['nodes_json'] = (existing_sub.get('nodes_json') or []) + valid_json_nodes
                 existing_sub['enabled'] = item_enabled
                 items_to_insert.append(existing_sub)
             else:
@@ -2772,6 +2861,8 @@ def api_push_nodes():
                     "nezha_id": "",
                     "info": None
                 }
+                if valid_json_nodes:
+                    new_sub['nodes_json'] = valid_json_nodes
                 # 如果是 Argo 独立订阅，自动尝试继承同 VPS 主订阅已有的探针与配额
                 if is_argo:
                     base_tag = re.sub(r'[\-_\s]*(argo|优选|本机|直连)[\-_\s]*', '', tag, flags=re.IGNORECASE).strip()
@@ -3159,6 +3250,12 @@ def sub():
     
     filter_kw = request.args.get('filter', '')
     exclude_kw = request.args.get('exclude', '')
+    ipver = request.args.get('ipver', '').strip()
+    argo_80_arg = request.args.get('argo_80', '')
+    if argo_80_arg != '':
+        argo_80_on = str(argo_80_arg).lower() in ('1', 'true', 'yes', 'on')
+    else:
+        argo_80_on = bool(d.get('config', {}).get('argo_80', False))
     
     final_list = []
     pool = ips
@@ -3166,6 +3263,21 @@ def sub():
         pool = random.sample(ips, d.get('max_ips_per_node'))
 
     tag_counters = {}
+
+    def _emit_node(node_obj, eff_ip, eff_port, eff_name):
+        eff_server = eff_ip or node_obj.get('server', '')
+        if ipver == '4' and is_ipv6_host(eff_server):
+            return
+        if ipver == '6' and not is_ipv6_host(eff_server):
+            return
+        if flag in ['clash', 'openclash', 'meta']:
+            obj = gen_clash(node_obj, eff_ip, eff_port, eff_name)
+        elif flag == 'singbox':
+            obj = gen_singbox(node_obj, eff_ip, eff_port, eff_name)
+        else:
+            obj = gen_uri(node_obj, eff_ip, eff_port, eff_name)
+        if obj:
+            final_list.append(obj)
 
     for n in nodes:
         if not isinstance(n, dict) or 'type' not in n: continue
@@ -3186,6 +3298,7 @@ def sub():
         node_name_base = ensure_node_flag(node_name_base, tag, n.get('server', ''))
         
         target_ips = [None]
+        is_cf_expanded = False
         if not raw_mode:
             is_opt_enable = n.get('_opt', True)
             is_protocol_support = n['type'] in ['vless', 'vmess', 'trojan'] and n.get('network') in ['ws', 'grpc']
@@ -3193,15 +3306,16 @@ def sub():
             
             if is_opt_enable and is_protocol_support and ips:
                 target_ips = pool
+                is_cf_expanded = True
         
         for i, ip_str in enumerate(target_ips):
-            ip = None; port = None
+            ip = None; port = None; custom_port = None
             if ip_str:
                 ip, custom_port = split_host_port(ip_str)
                 if custom_port:
-                    port = custom_port
+                    port = int(custom_port)
                 else: 
-                    is_secure = n.get('tls') or n.get('reality') or n['type'] in ['trojan', 'hysteria2', 'tuic']
+                    is_secure = n.get('tls') or n.get('reality') or n['type'] in ['trojan', 'hysteria2', 'tuic', 'anytls']
                     if n['type'] == 'ss' and n.get('plugin_opts', {}).get('tls'): is_secure = True
                     port = 443 if is_secure else 80
                 port = int(port)
@@ -3209,13 +3323,26 @@ def sub():
             node_name = node_name_base
             if not raw_mode and len(target_ips) > 1: node_name = f"{node_name_base}-{i+1}"
             node_name = ensure_node_flag(node_name, tag, n.get('server', ''))
-            
-            obj = None
-            if flag in ['clash', 'openclash', 'meta']: obj = gen_clash(n, ip, port, node_name)
-            elif flag == 'singbox': obj = gen_singbox(n, ip, port, node_name)
-            else: obj = gen_uri(n, ip, port, node_name)
-            if obj: final_list.append(obj)
+
+            n_eff = n
+            if is_cf_expanded and custom_port and int(custom_port) in CF_HTTP_PORTS and n.get('tls'):
+                n_eff = copy.deepcopy(n)
+                if not n_eff.get('ws-host') and n_eff.get('sni'):
+                    n_eff['ws-host'] = n_eff['sni']
+                n_eff['tls'] = False
+                n_eff['sni'] = ''
+
+            _emit_node(n_eff, ip, port, node_name)
             if len(final_list) >= MAX_NODES_OUTPUT: break
+
+            if is_cf_expanded and argo_80_on and not custom_port and n.get('tls') and n.get('network') == 'ws':
+                n_80 = copy.deepcopy(n)
+                if not n_80.get('ws-host') and n_80.get('sni'):
+                    n_80['ws-host'] = n_80['sni']
+                n_80['tls'] = False
+                n_80['sni'] = ''
+                _emit_node(n_80, ip, 80, f"{node_name}-80")
+                if len(final_list) >= MAX_NODES_OUTPUT: break
         tag_counters[tag] += 1
         if len(final_list) >= MAX_NODES_OUTPUT: break
 

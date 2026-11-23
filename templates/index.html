@@ -1000,6 +1000,8 @@
         .proto-trojan { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
         .proto-hysteria2, .proto-hy2 { background: rgba(239, 68, 68, 0.2); color: #f87171; }
         .proto-tuic { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+        .proto-anytls { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
+        .proto-snell { background: rgba(20, 184, 166, 0.2); color: #2dd4bf; }
         .proto-ss { background: rgba(16, 185, 129, 0.2); color: #34d399; }
         .proto-ws { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
         .proto-other { background: rgba(156, 163, 175, 0.2); color: #d1d5db; }
@@ -1118,14 +1120,20 @@
                 <textarea name="ips" id="ips_area" rows="4" placeholder="每行一个 IP 或 IP:端口，如：&#10;104.16.1.1&#10;172.67.1.1:8443&#10;[2606:4700::1]:443">{{ data.ips }}</textarea>
                 
                 <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: var(--text-sec);">
-                        <span>每个节点替换 IP 副本数:</span>
-                        <select name="max_ips_per_node" style="width: auto; padding: 4px 8px;">
-                            <option value="0" {% if data.max_ips_per_node==0 %}selected{% endif %}>全部 IP 展开</option>
-                            <option value="3" {% if data.max_ips_per_node==3 %}selected{% endif %}>每个节点 3 个</option>
-                            <option value="5" {% if data.max_ips_per_node==5 %}selected{% endif %}>每个节点 5 个 (推荐)</option>
-                            <option value="10" {% if data.max_ips_per_node==10 %}selected{% endif %}>每个节点 10 个</option>
-                        </select>
+                    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 0.88rem; color: var(--text-sec);">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>每个节点替换 IP 副本数:</span>
+                            <select name="max_ips_per_node" style="width: auto; padding: 4px 8px;">
+                                <option value="0" {% if data.max_ips_per_node==0 %}selected{% endif %}>全部 IP 展开</option>
+                                <option value="3" {% if data.max_ips_per_node==3 %}selected{% endif %}>每个节点 3 个</option>
+                                <option value="5" {% if data.max_ips_per_node==5 %}selected{% endif %}>每个节点 5 个 (推荐)</option>
+                                <option value="10" {% if data.max_ips_per_node==10 %}selected{% endif %}>每个节点 10 个</option>
+                            </select>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.84rem;" title="开启后，未指定端口的优选 IP 将同时输出 443(TLS) 与 80(非TLS) 双节点作为 443 QoS 兜底">
+                            <input type="checkbox" name="cfg_argo_80" value="1" {% if data.config.argo_80 %}checked{% endif %} style="width: auto;">
+                            <span>Argo 443+80 双端口优选兜底</span>
+                        </label>
                     </div>
                     <div style="display:flex; gap:6px;">
                         <button type="button" class="btn btn-ghost btn-sm" onclick="clearIPs()">🧹 清空列表</button>
@@ -1435,9 +1443,18 @@
             <div style="margin-bottom: 8px; font-size: 0.82rem; font-weight: 600; color: var(--text-sec);">⚡ 快捷筛选分类 (点击切换过滤)</div>
             <div id="group-chips" class="group-chips">正在分析节点地区...</div>
 
-            <div style="display: flex; gap: 10px; margin-bottom: 18px;">
-                <input id="filterInput" placeholder="包含关键词 (Filter，如：HK|US)" onkeyup="updateLinks()">
-                <input id="excludeInput" placeholder="排除关键词 (Exclude，如：游戏|测试)" onkeyup="updateLinks()">
+            <div style="display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center;">
+                <input id="filterInput" placeholder="包含关键词 (Filter，如：HK|US)" onkeyup="updateLinks()" style="flex: 1; min-width: 180px;">
+                <input id="excludeInput" placeholder="排除关键词 (Exclude，如：游戏|测试)" onkeyup="updateLinks()" style="flex: 1; min-width: 180px;">
+                <select id="ipverSelect" onchange="updateLinks()" style="width: auto; padding: 8px 10px;">
+                    <option value="">IP 版本: 全部 (v4+v6)</option>
+                    <option value="4">仅 IPv4 节点</option>
+                    <option value="6">仅 IPv6 节点</option>
+                </select>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.84rem; color: var(--text-sec); white-space: nowrap;">
+                    <input type="checkbox" id="argo80Toggle" onchange="updateLinks()" {% if data.config.argo_80 %}checked{% endif %} style="width: auto;">
+                    <span>80 端口兜底</span>
+                </label>
             </div>
 
             <!-- Export Cards Grid -->
@@ -1472,7 +1489,7 @@
                     <div class="export-card-header">
                         <div class="export-title" style="color: var(--primary);">
                             <span>⚡ OpenClash / Clash.Meta / Mihomo 订阅</span>
-                            <span class="export-badge">已原生适配 Reality / Hy2 / TUIC / Argo(VLESS+WS)</span>
+                            <span class="export-badge">已原生适配 Reality / Hy2 / TUIC / AnyTLS / Snell v6 / Argo</span>
                         </div>
                     </div>
                     <div class="export-input-row">
@@ -2968,11 +2985,15 @@
     function updateLinks() {
         const filter = document.getElementById('filterInput') ? document.getElementById('filterInput').value.trim() : '';
         const exclude = document.getElementById('excludeInput') ? document.getElementById('excludeInput').value.trim() : '';
+        const ipver = document.getElementById('ipverSelect') ? document.getElementById('ipverSelect').value : '';
+        const argo80 = document.getElementById('argo80Toggle') ? document.getElementById('argo80Toggle').checked : false;
         const sbFormat = document.getElementById('sb-format-select') ? document.getElementById('sb-format-select').value : 'full';
 
         let query = "";
         if (filter) query += `&filter=${encodeURIComponent(filter)}`;
         if (exclude) query += `&exclude=${encodeURIComponent(exclude)}`;
+        if (ipver) query += `&ipver=${encodeURIComponent(ipver)}`;
+        if (argo80) query += `&argo_80=1`;
         
         const v2Url = BASE_URL + query;
         const clashUrl = BASE_URL + "&flag=clash" + query;
